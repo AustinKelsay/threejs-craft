@@ -13,6 +13,17 @@ const sunriseColor = new THREE.Color(0xff6b35);
 const dayColor = new THREE.Color(0x87ceeb);
 const nightColor = new THREE.Color(0x191970);
 const workingColor = new THREE.Color();
+let compassNeedle = null;
+let compassTimeDisplay = null;
+
+function ensureCompassElements() {
+  if (!compassNeedle) {
+    compassNeedle = document.getElementById('compassNeedle');
+  }
+  if (!compassTimeDisplay) {
+    compassTimeDisplay = document.getElementById('timeDisplay');
+  }
+}
 
 /**
  * Update the day/night cycle
@@ -83,19 +94,26 @@ export function updateDayNightCycle() {
  * @param {number} progress - Progress through current cycle (0-1)
  */
 function updateCompass(isDay, progress) {
-  const needle = document.getElementById('compassNeedle');
-  const timeDisplay = document.getElementById('timeDisplay');
-  
-  if (needle) {
+  ensureCompassElements();
+
+  if (compassNeedle) {
     const rotation = -cameraController.yaw * (180 / Math.PI) - 90;
-    needle.style.transform = `translate(-50%, -100%) rotate(${rotation}deg)`;
+    compassNeedle.style.transform = `translate(-50%, -100%) rotate(${rotation}deg)`;
   }
-  
-  if (timeDisplay) {
+
+  if (compassTimeDisplay) {
+    let timeOfDay;
     if (isDay) {
-      timeDisplay.textContent = progress < 0.5 ? 'Morning' : 'Afternoon';
+      if (progress < 0.33) {
+        timeOfDay = '🌅 Morning';
+      } else if (progress < 0.7) {
+        timeOfDay = '☀️ Afternoon';
+      } else {
+        timeOfDay = '🌆 Evening';
+      }
     } else {
-      timeDisplay.textContent = 'Night';
+      timeOfDay = '🌙 Night';
     }
+    compassTimeDisplay.textContent = timeOfDay;
   }
 }

@@ -31,10 +31,19 @@ export function createTree(x, z) {
   });
 
   // Foliage material with green color variation only
-  // Vary only the green channel to keep it in green shades
+  // Extract base color components and vary only the green shades
   const baseColor = CONFIG.objects.tree.foliageColor;
-  const greenVariation = Math.floor(Math.random() * 0x002200); // Only vary green channel
-  const foliageColorVariation = baseColor + greenVariation;
+  const r = (baseColor >> 16) & 0xFF;
+  const g = (baseColor >> 8) & 0xFF;
+  const b = baseColor & 0xFF;
+
+  // Create variations in green shades only (darker to lighter greens)
+  // Keep red low, vary green significantly, keep blue very low
+  const variedR = Math.floor(r * (0.6 + Math.random() * 0.4)); // Slight variation in red (20-40)
+  const variedG = Math.floor(g * (0.7 + Math.random() * 0.5)); // Good variation in green (100-170)
+  const variedB = Math.floor(b * (0.3 + Math.random() * 0.4)); // Keep blue minimal (10-25)
+
+  const foliageColorVariation = (variedR << 16) | (variedG << 8) | variedB;
   const foliageMaterial = new THREE.MeshStandardMaterial({
     color: foliageColorVariation,
     roughness: 0.9

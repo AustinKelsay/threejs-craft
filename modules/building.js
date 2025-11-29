@@ -21,6 +21,47 @@ import { disposeObject, findParentObject } from './utils.js';
 const centerPointer = new THREE.Vector2(0, 0);
 const BUILD_FORWARD_VEC = new THREE.Vector3();
 
+// Highlight helpers to avoid cloning materials every frame
+function getMaterialState(mesh) {
+  if (!mesh.userData) {
+    mesh.userData = {};
+  }
+  if (!mesh.userData.baseMaterial) {
+    mesh.userData.baseMaterial = mesh.material;
+    if (mesh.material && mesh.material.emissive) {
+      mesh.userData.baseEmissive = mesh.material.emissive.clone();
+      mesh.userData.baseEmissiveIntensity = mesh.material.emissiveIntensity ?? 0;
+    }
+  }
+  if (!mesh.userData.highlightMaterial) {
+    // Clone once and reuse to avoid allocations on every hover frame
+    mesh.userData.highlightMaterial = mesh.material.clone();
+    mesh.userData.highlightMaterial.userData = mesh.userData.highlightMaterial.userData || {};
+    mesh.userData.highlightMaterial.userData.isHighlight = true;
+  }
+  return mesh.userData;
+}
+
+function applyEmissiveHighlight(mesh, emissiveColor, intensity) {
+  if (!mesh.isMesh || !mesh.material) return;
+  const state = getMaterialState(mesh);
+  mesh.material = state.highlightMaterial;
+  mesh.material.emissive = new THREE.Color(emissiveColor);
+  mesh.material.emissiveIntensity = intensity;
+}
+
+function restoreBaseMaterial(mesh) {
+  if (!mesh.isMesh || !mesh.material) return;
+  const base = mesh.userData?.baseMaterial;
+  if (base) {
+    mesh.material = base;
+    if (mesh.userData.baseEmissive && base.emissive) {
+      base.emissive.copy(mesh.userData.baseEmissive);
+      base.emissiveIntensity = mesh.userData.baseEmissiveIntensity ?? base.emissiveIntensity;
+    }
+  }
+}
+
 /**
  * Build an object at the current build position
  */
@@ -193,11 +234,7 @@ export function updateObjectHighlight() {
   // Use recursive=true to check all children (including doors on houses)
   const intersects = raycaster.intersectObjects(objectsToCheck, true);
   
-  // Reset previous highlight
-  if (highlightedObject) {
-    resetObjectHighlight(highlightedObject);
-    setHighlightedObject(null);
-  }
+  let target = null;
   
   // Highlight new object if within range
   if (intersects.length > 0) {
@@ -208,29 +245,46 @@ export function updateObjectHighlight() {
     if (hitObject.userData && hitObject.userData.type === 'door' && distance < CONFIG.building.distance) {
       // Check if it's an exterior door (when outside) or interior door (when inside)
       if (!worldState.isInside || (worldState.isInside && hitObject.userData.isInteractive)) {
-        setHighlightedObject(hitObject);
-        highlightDoor(hitObject);
-        return;
+        target = hitObject;
       }
-    }
-    
-    // If not a door, find the top-level parent object (house, tree, etc.)
-    let parentObject = hitObject;
-    while (parentObject.parent && parentObject.parent.name !== 'interactableObjects' && parentObject.parent.name !== 'interior') {
-      parentObject = parentObject.parent;
-    }
-    
-    // Check if the parent is interactable within range
-    if (parentObject && parentObject.userData && distance < CONFIG.building.distance) {
-      const type = parentObject.userData.type;
-      const isPickup = type === 'droppedResource';
-      const isMob = type === 'mob';
-      const isRemovable = parentObject.userData.removable === true;
+    } else {
+      // If not a door, find the top-level parent object (house, tree, etc.)
+      let parentObject = hitObject;
+      while (parentObject.parent && parentObject.parent.name !== 'interactableObjects' && parentObject.parent.name !== 'interior') {
+        parentObject = parentObject.parent;
+      }
+      
+      // Check if the parent is interactable within range
+      if (parentObject && parentObject.userData && distance < CONFIG.building.distance) {
+        const type = parentObject.userData.type;
+        const isPickup = type === 'droppedResource';
+        const isMob = type === 'mob';
+        const isRemovable = parentObject.userData.removable === true;
 
-      if (isPickup || isRemovable || isMob) {
-        setHighlightedObject(parentObject);
-        highlightObject(parentObject);
+        if (isPickup || isRemovable || isMob) {
+          target = parentObject;
+        }
       }
+    }
+  }
+
+  // Avoid work if highlight target hasn't changed
+  if (target === highlightedObject) {
+    updateGhostObject();
+    return;
+  }
+
+  if (highlightedObject) {
+    resetObjectHighlight(highlightedObject);
+  }
+
+  setHighlightedObject(target);
+
+  if (target) {
+    if (target.userData?.type === 'door') {
+      highlightDoor(target);
+    } else {
+      highlightObject(target);
     }
   }
   
@@ -247,11 +301,7 @@ function highlightObject(object) {
   const emissiveColor = isDragon ? CONFIG.building.dragonHighlightColor : CONFIG.building.highlightColor;
   const intensity = isDragon ? 0.7 : 0.3;
   object.traverse(child => {
-    if (child.isMesh) {
-      child.material = child.material.clone();
-      child.material.emissive = new THREE.Color(emissiveColor);
-      child.material.emissiveIntensity = intensity;
-    }
+    applyEmissiveHighlight(child, emissiveColor, intensity);
   });
 }
 
@@ -262,28 +312,11 @@ function highlightObject(object) {
 export function resetObjectHighlight(object) {
   // Check if it's a door
   if (object.userData && object.userData.type === 'door') {
-    // Reset door material emissive properties
-    if (object.material) {
-      // Clone the material if it hasn't been cloned yet
-      if (!object.material.isClone) {
-        object.material = object.material.clone();
-        object.material.isClone = true;
-      }
-      object.material.emissive = new THREE.Color(0x000000);
-      object.material.emissiveIntensity = 0;
-    }
+    restoreBaseMaterial(object);
   } else {
     // Regular object highlight reset
     object.traverse(child => {
-      if (child.isMesh && child.material) {
-        // Clone the material if it hasn't been cloned yet
-        if (!child.material.isClone) {
-          child.material = child.material.clone();
-          child.material.isClone = true;
-        }
-        child.material.emissive = new THREE.Color(0x000000);
-        child.material.emissiveIntensity = 0;
-      }
+      restoreBaseMaterial(child);
     });
   }
 }
@@ -293,15 +326,8 @@ export function resetObjectHighlight(object) {
  * @param {THREE.Mesh} door - The door mesh to highlight
  */
 function highlightDoor(door) {
-  if (door.isMesh && door.material) {
-    // Clone the material if it hasn't been cloned yet
-    if (!door.material.isClone) {
-      door.material = door.material.clone();
-      door.material.isClone = true;
-    }
-    door.material.emissive = new THREE.Color(CONFIG.interior.doorHighlightColor);
-    door.material.emissiveIntensity = 0.4;
-  }
+  if (!door.isMesh || !door.material) return;
+  applyEmissiveHighlight(door, CONFIG.interior.doorHighlightColor, 0.4);
 }
 
 /**

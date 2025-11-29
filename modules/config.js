@@ -39,7 +39,7 @@ export const CONFIG = {
   // Day/night cycle
   dayNight: {
     dayDuration: 240,         // Day length in seconds
-    nightDuration: 3,        // Night length in seconds
+    nightDuration: 30,        // Night length in seconds
     sunDistance: 150,         // Sun orbit radius
     moonDistance: 150         // Moon orbit radius
   },

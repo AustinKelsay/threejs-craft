@@ -8,26 +8,38 @@ let handsGroup;
 let leftHand;
 let rightHand;
 let punchTimer = 0;
+let isLeftPunch = true; // Alternate between left and right punches
 
 const PUNCH_DURATION = 0.35; // seconds
-const PUNCH_DEPTH = 0.4;
-const PUNCH_LIFT = 0.12;
-const IDLE_SWAY = 0.02;
+const PUNCH_DEPTH = 0.5;
+const PUNCH_LIFT = 0.15;
+const IDLE_SWAY = 0.015;
 
-const restLeftPos = new THREE.Vector3(-0.25, -0.35, -0.7);
-const restRightPos = new THREE.Vector3(0.25, -0.35, -0.7);
+// Lowered and moved back to be less obstructive
+const restLeftPos = new THREE.Vector3(-0.35, -0.55, -1.0);
+const restRightPos = new THREE.Vector3(0.35, -0.55, -1.0);
 
 function createFistMesh() {
-  const geometry = new THREE.BoxGeometry(0.16, 0.16, 0.2);
-  const material = new THREE.MeshStandardMaterial({
+  const fistGroup = new THREE.Group();
+
+  // Skin color material - Minecraft-style flat shading
+  const skinMaterial = new THREE.MeshStandardMaterial({
     color: 0xd2a679,
-    roughness: 0.8,
-    metalness: 0.05
+    roughness: 0.9,
+    metalness: 0.0,
+    flatShading: true
   });
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.castShadow = false;
-  mesh.receiveShadow = false;
-  return mesh;
+
+  // Simple blocky hand like Minecraft - more cube-like, less elongated
+  const handGeometry = new THREE.BoxGeometry(0.07, 0.12, 0.07);
+  const hand = new THREE.Mesh(handGeometry, skinMaterial);
+  hand.position.set(0, 0, 0);
+  fistGroup.add(hand);
+
+  fistGroup.castShadow = false;
+  fistGroup.receiveShadow = false;
+
+  return fistGroup;
 }
 
 /**
@@ -53,11 +65,12 @@ export function createHands() {
 }
 
 /**
- * Kick off a quick punch animation.
+ * Kick off a quick punch animation, alternating between left and right.
  */
 export function triggerPunchAnimation() {
   if (!handsGroup) return;
   punchTimer = PUNCH_DURATION;
+  isLeftPunch = !isLeftPunch; // Alternate for next punch
 }
 
 /**
@@ -84,14 +97,19 @@ export function updateHands(delta) {
     punchTimer = Math.max(0, punchTimer - delta);
     const t = 1 - punchTimer / PUNCH_DURATION; // 0..1
     const curve = Math.sin(Math.min(1, t) * Math.PI);
-    const offsetCurve = Math.sin(Math.min(1, Math.max(0, t - 0.08) / (1 - 0.08)) * Math.PI);
 
-    leftHand.position.z -= curve * PUNCH_DEPTH;
-    leftHand.position.y += curve * PUNCH_LIFT;
-    leftHand.rotation.x = -curve * 0.6;
+    // Only animate the active punching hand
+    const punchingHand = isLeftPunch ? leftHand : rightHand;
+    const restingHand = isLeftPunch ? rightHand : leftHand;
 
-    rightHand.position.z -= offsetCurve * PUNCH_DEPTH;
-    rightHand.position.y += offsetCurve * PUNCH_LIFT * 0.8;
-    rightHand.rotation.x = -offsetCurve * 0.55;
+    // Punching hand moves forward and up
+    punchingHand.position.z -= curve * PUNCH_DEPTH;
+    punchingHand.position.y += curve * PUNCH_LIFT;
+    punchingHand.rotation.x = -curve * 0.7;
+
+    // Resting hand stays back with slight pull-back for realism
+    const restingHandX = isLeftPunch ? 1 : -1;
+    restingHand.position.x += restingHandX * curve * 0.05;
+    restingHand.position.y -= curve * 0.02;
   }
 }

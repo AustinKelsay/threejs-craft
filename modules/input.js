@@ -12,7 +12,7 @@ import {
   removeResource, hasResourceAmount, worldObjects, inventoryOpen, selectedInventoryResource, raycaster, mobs
 } from './gameState.js';
 import { buildObject, removeObject, resetObjectHighlight } from './building.js';
-import { updateObjectSelector, updateSelectorContent, updateSaveStatus, toggleInventory, updateInventoryDisplay } from './ui.js';
+import { updateObjectSelector, updateSelectorContent, updateSaveStatus, toggleInventory, updateInventoryDisplay, toggleInstructions } from './ui.js';
 import { saveGameState, loadGameState, hasSaveData, saveCurrentInterior, loadHouseInterior } from './saveLoad.js';
 import { applyCameraMovement, updateCameraRotation } from './camera.js';
 import { createInterior, removeInterior } from './interior.js';
@@ -21,6 +21,17 @@ import { disposeObject } from './utils.js';
 import { damageMob } from './mobs.js';
 import { triggerPunchAnimation } from './hands.js';
 import { mountDragon, dismountDragon, isMounted } from './mount.js';
+
+const digitKeyToIndex = {
+  Digit0: 0,
+  Digit1: 1,
+  Digit2: 2,
+  Digit3: 3,
+  Digit4: 4,
+  Digit5: 5,
+  Digit6: 6,
+  Digit7: 7
+};
 
 /**
  * Setup all event listeners
@@ -53,6 +64,10 @@ export function setupEventListeners() {
  * @param {KeyboardEvent} event
  */
 function onKeyDown(event) {
+  if (tryHandleDigitSelection(event.code)) {
+    return;
+  }
+
   switch (event.code) {
     case 'KeyW':
     case 'ArrowUp':
@@ -111,38 +126,6 @@ function onKeyDown(event) {
     case 'KeyB':
       buildObject();
       break;
-    case 'Digit0':
-      setSelectedObjectType(0); // Fists
-      updateObjectSelector();
-      break;
-    case 'Digit1':
-      setSelectedObjectType(1); // Tree
-      updateObjectSelector();
-      break;
-    case 'Digit2':
-      setSelectedObjectType(2); // Rock
-      updateObjectSelector();
-      break;
-    case 'Digit3':
-      setSelectedObjectType(3); // House
-      updateObjectSelector();
-      break;
-    case 'Digit4':
-      setSelectedObjectType(4); // Cow
-      updateObjectSelector();
-      break;
-    case 'Digit5':
-      setSelectedObjectType(5); // Pig
-      updateObjectSelector();
-      break;
-    case 'Digit6':
-      setSelectedObjectType(6); // Horse
-      updateObjectSelector();
-      break;
-    case 'Digit7':
-      setSelectedObjectType(7); // Dog (when inside)
-      updateObjectSelector();
-      break;
     case 'F5':
       event.preventDefault(); // Prevent browser refresh
       handleSave();
@@ -164,6 +147,9 @@ function onKeyDown(event) {
     case 'KeyG':
       handleDropResource();
       break;
+    case 'KeyH':
+      toggleInstructions();
+      break;
   }
 }
 
@@ -172,6 +158,10 @@ function onKeyDown(event) {
  * @param {KeyboardEvent} event
  */
 function onKeyUp(event) {
+  if (digitKeyToIndex[event.code] !== undefined) {
+    return; // Number keys don't hold state; ignore on keyup.
+  }
+
   switch (event.code) {
     case 'KeyW':
     case 'ArrowUp':
@@ -194,6 +184,14 @@ function onKeyUp(event) {
       keys.sprint = false;
       break;
   }
+}
+
+function tryHandleDigitSelection(code) {
+  const slot = digitKeyToIndex[code];
+  if (slot === undefined) return false;
+  setSelectedObjectType(slot);
+  updateObjectSelector();
+  return true;
 }
 
 /**

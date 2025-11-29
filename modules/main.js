@@ -9,7 +9,8 @@
 import { CONFIG } from './config.js';
 import { 
   setScene, setCamera, setRenderer, setClock, setRaycaster,
-  scene, camera, renderer, clock, worldState, worldObjects, worldAnimals
+  scene, camera, renderer, clock, worldState, worldObjects, worldAnimals,
+  interiorObjects, interiorAnimals, mobs, interactableObjects
 } from './gameState.js';
 import { createWorld, createLighting } from './world.js';
 import { createInitialWorldObjects } from './worldObjects.js';
@@ -31,6 +32,20 @@ import { updateHealthRegen } from './health.js';
  */
 function init() {
   try {
+    if (!window.THREE) {
+      throw new Error('Three.js is not available on this page');
+    }
+
+    const webglSupported = (() => {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      return !!gl;
+    })();
+    if (!webglSupported) {
+      alert('WebGL is not supported in this browser. Please update or enable hardware acceleration.');
+      return;
+    }
+
     // Clock for time tracking
     setClock(new THREE.Clock());
     
@@ -126,13 +141,24 @@ function animate() {
  * Clean up resources when the window is closed
  */
 function cleanup() {
-  // Dispose of all world objects
-  worldObjects.forEach(object => {
-    disposeObject(object);
+  const collections = [worldObjects, interiorObjects, worldAnimals, interiorAnimals, mobs];
+  collections.forEach(list => {
+    list.forEach(disposeObject);
   });
+
+  if (worldState.interiorGroup) {
+    disposeObject(worldState.interiorGroup);
+  }
+
+  if (interactableObjects) {
+    interactableObjects.children.slice().forEach(disposeObject);
+  }
   
   // Dispose of renderer
   if (renderer) {
+    if (renderer.renderLists?.dispose) {
+      renderer.renderLists.dispose();
+    }
     renderer.dispose();
   }
   

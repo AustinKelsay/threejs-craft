@@ -43,7 +43,7 @@ const CONFIG = {
   // Day/night cycle
   dayNight: {
     dayDuration: 240,         // Day length in seconds
-    nightDuration: 3,        // Night length in seconds
+    nightDuration: 30,        // Night length in seconds
     sunDistance: 150,         // Sun orbit radius
     moonDistance: 150         // Moon orbit radius
   },
@@ -620,28 +620,54 @@ function getResourceCount(resourceType) {
  */
 function disposeObject(object) {
   if (!object) return;
-  
-  object.traverse(child => {
-    if (child.isMesh) {
-      // Dispose geometry
-      if (child.geometry) {
-        child.geometry.dispose();
-      }
-      
-      // Dispose material(s)
-      if (child.material) {
-        const materials = Array.isArray(child.material) ? child.material : [child.material];
-        materials.forEach(material => {
-          // Dispose textures
-          for (const prop in material) {
-            if (material[prop] && material[prop].isTexture) {
-              material[prop].dispose();
-            }
-          }
-          material.dispose();
-        });
+
+  // Track already-disposed materials to avoid double-dispose on shared refs
+  const disposedMaterials = new Set();
+
+  const disposeMaterial = (material) => {
+    if (!material || disposedMaterials.has(material)) return;
+    // Dispose textures
+    for (const prop in material) {
+      if (material[prop] && material[prop].isTexture) {
+        material[prop].dispose();
       }
     }
+    material.dispose();
+    disposedMaterials.add(material);
+  };
+  
+  object.traverse(child => {
+    if (!child.isMesh) return;
+
+    // Dispose geometry
+    if (child.geometry) {
+      child.geometry.dispose();
+    }
+    
+    // Collect all materials that might have been cached on the mesh
+    const materials = [];
+    const baseMaterial = child.material;
+    if (baseMaterial) {
+      if (Array.isArray(baseMaterial)) {
+        materials.push(...baseMaterial);
+      } else {
+        materials.push(baseMaterial);
+      }
+    }
+
+    // Cached highlight/base materials created by the highlight system
+    if (child.userData) {
+      const { highlightMaterial, baseMaterial: cachedBase } = child.userData;
+      if (highlightMaterial) materials.push(highlightMaterial);
+      if (cachedBase && cachedBase !== baseMaterial) materials.push(cachedBase);
+      // Clear references to help GC
+      child.userData.highlightMaterial = null;
+      child.userData.baseMaterial = null;
+      child.userData.baseEmissive = null;
+      child.userData.baseEmissiveIntensity = null;
+    }
+
+    materials.forEach(disposeMaterial);
   });
   
   // Remove from parent
@@ -1672,10 +1698,19 @@ function createTree(x, z) {
   });
 
   // Foliage material with green color variation only
-  // Vary only the green channel to keep it in green shades
+  // Extract base color components and vary only the green shades
   const baseColor = CONFIG.objects.tree.foliageColor;
-  const greenVariation = Math.floor(Math.random() * 0x002200); // Only vary green channel
-  const foliageColorVariation = baseColor + greenVariation;
+  const r = (baseColor >> 16) & 0xFF;
+  const g = (baseColor >> 8) & 0xFF;
+  const b = baseColor & 0xFF;
+
+  // Create variations in green shades only (darker to lighter greens)
+  // Keep red low, vary green significantly, keep blue very low
+  const variedR = Math.floor(r * (0.6 + Math.random() * 0.4)); // Slight variation in red (20-40)
+  const variedG = Math.floor(g * (0.7 + Math.random() * 0.5)); // Good variation in green (100-170)
+  const variedB = Math.floor(b * (0.3 + Math.random() * 0.4)); // Keep blue minimal (10-25)
+
+  const foliageColorVariation = (variedR << 16) | (variedG << 8) | variedB;
   const foliageMaterial = new THREE.MeshStandardMaterial({
     color: foliageColorVariation,
     roughness: 0.9
@@ -4053,6 +4088,47 @@ function removeInterior() {
 const centerPointer = new THREE.Vector2(0, 0);
 const BUILD_FORWARD_VEC = new THREE.Vector3();
 
+// Highlight helpers to avoid cloning materials every frame
+function getMaterialState(mesh) {
+  if (!mesh.userData) {
+    mesh.userData = {};
+  }
+  if (!mesh.userData.baseMaterial) {
+    mesh.userData.baseMaterial = mesh.material;
+    if (mesh.material && mesh.material.emissive) {
+      mesh.userData.baseEmissive = mesh.material.emissive.clone();
+      mesh.userData.baseEmissiveIntensity = mesh.material.emissiveIntensity ?? 0;
+    }
+  }
+  if (!mesh.userData.highlightMaterial) {
+    // Clone once and reuse to avoid allocations on every hover frame
+    mesh.userData.highlightMaterial = mesh.material.clone();
+    mesh.userData.highlightMaterial.userData = mesh.userData.highlightMaterial.userData || {};
+    mesh.userData.highlightMaterial.userData.isHighlight = true;
+  }
+  return mesh.userData;
+}
+
+function applyEmissiveHighlight(mesh, emissiveColor, intensity) {
+  if (!mesh.isMesh || !mesh.material) return;
+  const state = getMaterialState(mesh);
+  mesh.material = state.highlightMaterial;
+  mesh.material.emissive = new THREE.Color(emissiveColor);
+  mesh.material.emissiveIntensity = intensity;
+}
+
+function restoreBaseMaterial(mesh) {
+  if (!mesh.isMesh || !mesh.material) return;
+  const base = mesh.userData?.baseMaterial;
+  if (base) {
+    mesh.material = base;
+    if (mesh.userData.baseEmissive && base.emissive) {
+      base.emissive.copy(mesh.userData.baseEmissive);
+      base.emissiveIntensity = mesh.userData.baseEmissiveIntensity ?? base.emissiveIntensity;
+    }
+  }
+}
+
 /**
  * Build an object at the current build position
  */
@@ -4225,11 +4301,7 @@ function updateObjectHighlight() {
   // Use recursive=true to check all children (including doors on houses)
   const intersects = raycaster.intersectObjects(objectsToCheck, true);
   
-  // Reset previous highlight
-  if (highlightedObject) {
-    resetObjectHighlight(highlightedObject);
-    setHighlightedObject(null);
-  }
+  let target = null;
   
   // Highlight new object if within range
   if (intersects.length > 0) {
@@ -4240,29 +4312,46 @@ function updateObjectHighlight() {
     if (hitObject.userData && hitObject.userData.type === 'door' && distance < CONFIG.building.distance) {
       // Check if it's an exterior door (when outside) or interior door (when inside)
       if (!worldState.isInside || (worldState.isInside && hitObject.userData.isInteractive)) {
-        setHighlightedObject(hitObject);
-        highlightDoor(hitObject);
-        return;
+        target = hitObject;
       }
-    }
-    
-    // If not a door, find the top-level parent object (house, tree, etc.)
-    let parentObject = hitObject;
-    while (parentObject.parent && parentObject.parent.name !== 'interactableObjects' && parentObject.parent.name !== 'interior') {
-      parentObject = parentObject.parent;
-    }
-    
-    // Check if the parent is interactable within range
-    if (parentObject && parentObject.userData && distance < CONFIG.building.distance) {
-      const type = parentObject.userData.type;
-      const isPickup = type === 'droppedResource';
-      const isMob = type === 'mob';
-      const isRemovable = parentObject.userData.removable === true;
+    } else {
+      // If not a door, find the top-level parent object (house, tree, etc.)
+      let parentObject = hitObject;
+      while (parentObject.parent && parentObject.parent.name !== 'interactableObjects' && parentObject.parent.name !== 'interior') {
+        parentObject = parentObject.parent;
+      }
+      
+      // Check if the parent is interactable within range
+      if (parentObject && parentObject.userData && distance < CONFIG.building.distance) {
+        const type = parentObject.userData.type;
+        const isPickup = type === 'droppedResource';
+        const isMob = type === 'mob';
+        const isRemovable = parentObject.userData.removable === true;
 
-      if (isPickup || isRemovable || isMob) {
-        setHighlightedObject(parentObject);
-        highlightObject(parentObject);
+        if (isPickup || isRemovable || isMob) {
+          target = parentObject;
+        }
       }
+    }
+  }
+
+  // Avoid work if highlight target hasn't changed
+  if (target === highlightedObject) {
+    updateGhostObject();
+    return;
+  }
+
+  if (highlightedObject) {
+    resetObjectHighlight(highlightedObject);
+  }
+
+  setHighlightedObject(target);
+
+  if (target) {
+    if (target.userData?.type === 'door') {
+      highlightDoor(target);
+    } else {
+      highlightObject(target);
     }
   }
   
@@ -4279,11 +4368,7 @@ function highlightObject(object) {
   const emissiveColor = isDragon ? CONFIG.building.dragonHighlightColor : CONFIG.building.highlightColor;
   const intensity = isDragon ? 0.7 : 0.3;
   object.traverse(child => {
-    if (child.isMesh) {
-      child.material = child.material.clone();
-      child.material.emissive = new THREE.Color(emissiveColor);
-      child.material.emissiveIntensity = intensity;
-    }
+    applyEmissiveHighlight(child, emissiveColor, intensity);
   });
 }
 
@@ -4294,28 +4379,11 @@ function highlightObject(object) {
 function resetObjectHighlight(object) {
   // Check if it's a door
   if (object.userData && object.userData.type === 'door') {
-    // Reset door material emissive properties
-    if (object.material) {
-      // Clone the material if it hasn't been cloned yet
-      if (!object.material.isClone) {
-        object.material = object.material.clone();
-        object.material.isClone = true;
-      }
-      object.material.emissive = new THREE.Color(0x000000);
-      object.material.emissiveIntensity = 0;
-    }
+    restoreBaseMaterial(object);
   } else {
     // Regular object highlight reset
     object.traverse(child => {
-      if (child.isMesh && child.material) {
-        // Clone the material if it hasn't been cloned yet
-        if (!child.material.isClone) {
-          child.material = child.material.clone();
-          child.material.isClone = true;
-        }
-        child.material.emissive = new THREE.Color(0x000000);
-        child.material.emissiveIntensity = 0;
-      }
+      restoreBaseMaterial(child);
     });
   }
 }
@@ -4325,15 +4393,8 @@ function resetObjectHighlight(object) {
  * @param {THREE.Mesh} door - The door mesh to highlight
  */
 function highlightDoor(door) {
-  if (door.isMesh && door.material) {
-    // Clone the material if it hasn't been cloned yet
-    if (!door.material.isClone) {
-      door.material = door.material.clone();
-      door.material.isClone = true;
-    }
-    door.material.emissive = new THREE.Color(CONFIG.interior.doorHighlightColor);
-    door.material.emissiveIntensity = 0.4;
-  }
+  if (!door.isMesh || !door.material) return;
+  applyEmissiveHighlight(door, CONFIG.interior.doorHighlightColor, 0.4);
 }
 
 /**
@@ -5018,26 +5079,38 @@ let handsGroup;
 let leftHand;
 let rightHand;
 let punchTimer = 0;
+let isLeftPunch = true; // Alternate between left and right punches
 
 const PUNCH_DURATION = 0.35; // seconds
-const PUNCH_DEPTH = 0.4;
-const PUNCH_LIFT = 0.12;
-const IDLE_SWAY = 0.02;
+const PUNCH_DEPTH = 0.5;
+const PUNCH_LIFT = 0.15;
+const IDLE_SWAY = 0.015;
 
-const restLeftPos = new THREE.Vector3(-0.25, -0.35, -0.7);
-const restRightPos = new THREE.Vector3(0.25, -0.35, -0.7);
+// Lowered and moved back to be less obstructive
+const restLeftPos = new THREE.Vector3(-0.35, -0.55, -1.0);
+const restRightPos = new THREE.Vector3(0.35, -0.55, -1.0);
 
 function createFistMesh() {
-  const geometry = new THREE.BoxGeometry(0.16, 0.16, 0.2);
-  const material = new THREE.MeshStandardMaterial({
+  const fistGroup = new THREE.Group();
+
+  // Skin color material - Minecraft-style flat shading
+  const skinMaterial = new THREE.MeshStandardMaterial({
     color: 0xd2a679,
-    roughness: 0.8,
-    metalness: 0.05
+    roughness: 0.9,
+    metalness: 0.0,
+    flatShading: true
   });
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.castShadow = false;
-  mesh.receiveShadow = false;
-  return mesh;
+
+  // Simple blocky hand like Minecraft - more cube-like, less elongated
+  const handGeometry = new THREE.BoxGeometry(0.07, 0.12, 0.07);
+  const hand = new THREE.Mesh(handGeometry, skinMaterial);
+  hand.position.set(0, 0, 0);
+  fistGroup.add(hand);
+
+  fistGroup.castShadow = false;
+  fistGroup.receiveShadow = false;
+
+  return fistGroup;
 }
 
 /**
@@ -5063,11 +5136,12 @@ function createHands() {
 }
 
 /**
- * Kick off a quick punch animation.
+ * Kick off a quick punch animation, alternating between left and right.
  */
 function triggerPunchAnimation() {
   if (!handsGroup) return;
   punchTimer = PUNCH_DURATION;
+  isLeftPunch = !isLeftPunch; // Alternate for next punch
 }
 
 /**
@@ -5094,15 +5168,20 @@ function updateHands(delta) {
     punchTimer = Math.max(0, punchTimer - delta);
     const t = 1 - punchTimer / PUNCH_DURATION; // 0..1
     const curve = Math.sin(Math.min(1, t) * Math.PI);
-    const offsetCurve = Math.sin(Math.min(1, Math.max(0, t - 0.08) / (1 - 0.08)) * Math.PI);
 
-    leftHand.position.z -= curve * PUNCH_DEPTH;
-    leftHand.position.y += curve * PUNCH_LIFT;
-    leftHand.rotation.x = -curve * 0.6;
+    // Only animate the active punching hand
+    const punchingHand = isLeftPunch ? leftHand : rightHand;
+    const restingHand = isLeftPunch ? rightHand : leftHand;
 
-    rightHand.position.z -= offsetCurve * PUNCH_DEPTH;
-    rightHand.position.y += offsetCurve * PUNCH_LIFT * 0.8;
-    rightHand.rotation.x = -offsetCurve * 0.55;
+    // Punching hand moves forward and up
+    punchingHand.position.z -= curve * PUNCH_DEPTH;
+    punchingHand.position.y += curve * PUNCH_LIFT;
+    punchingHand.rotation.x = -curve * 0.7;
+
+    // Resting hand stays back with slight pull-back for realism
+    const restingHandX = isLeftPunch ? 1 : -1;
+    restingHand.position.x += restingHandX * curve * 0.05;
+    restingHand.position.y -= curve * 0.02;
   }
 }
 
@@ -5118,6 +5197,17 @@ const sunriseColor = new THREE.Color(0xff6b35);
 const dayColor = new THREE.Color(0x87ceeb);
 const nightColor = new THREE.Color(0x191970);
 const workingColor = new THREE.Color();
+let compassNeedle = null;
+let compassTimeDisplay = null;
+
+function ensureCompassElements() {
+  if (!compassNeedle) {
+    compassNeedle = document.getElementById('compassNeedle');
+  }
+  if (!compassTimeDisplay) {
+    compassTimeDisplay = document.getElementById('timeDisplay');
+  }
+}
 
 /**
  * Update the day/night cycle
@@ -5188,20 +5278,27 @@ function updateDayNightCycle() {
  * @param {number} progress - Progress through current cycle (0-1)
  */
 function updateCompass(isDay, progress) {
-  const needle = document.getElementById('compassNeedle');
-  const timeDisplay = document.getElementById('timeDisplay');
-  
-  if (needle) {
+  ensureCompassElements();
+
+  if (compassNeedle) {
     const rotation = -cameraController.yaw * (180 / Math.PI) - 90;
-    needle.style.transform = `translate(-50%, -100%) rotate(${rotation}deg)`;
+    compassNeedle.style.transform = `translate(-50%, -100%) rotate(${rotation}deg)`;
   }
-  
-  if (timeDisplay) {
+
+  if (compassTimeDisplay) {
+    let timeOfDay;
     if (isDay) {
-      timeDisplay.textContent = progress < 0.5 ? 'Morning' : 'Afternoon';
+      if (progress < 0.33) {
+        timeOfDay = '🌅 Morning';
+      } else if (progress < 0.7) {
+        timeOfDay = '☀️ Afternoon';
+      } else {
+        timeOfDay = '🌆 Evening';
+      }
     } else {
-      timeDisplay.textContent = 'Night';
+      timeOfDay = '🌙 Night';
     }
+    compassTimeDisplay.textContent = timeOfDay;
   }
 }
 
@@ -5256,16 +5353,55 @@ function createCompass() {
     left: 20px;
     width: ${CONFIG.ui.compassSize}px;
     height: ${CONFIG.ui.compassSize}px;
-    background: rgba(0, 0, 0, 0.5);
+    background: linear-gradient(135deg, rgba(30,30,35,0.95) 0%, rgba(20,20,25,0.95) 100%);
+    border: 2px solid var(--panel-border);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4), inset 0 1px 3px rgba(255,255,255,0.1);
     border-radius: 50%;
-    color: white;
-    font-family: Arial;
+    color: var(--text);
+    font-family: var(--font);
     font-size: 12px;
+    backdrop-filter: blur(10px);
   `;
+
+  const compassSize = CONFIG.ui.compassSize;
+  const centerOffset = compassSize / 2;
+  const cardinalOffset = 8;
+
   compass.innerHTML = `
-    <div style="position: absolute; top: 5px; left: 50%; transform: translateX(-50%);">N</div>
-    <div id="compassNeedle" style="position: absolute; top: 50%; left: 50%; width: 2px; height: 30px; background: red; transform-origin: center bottom;"></div>
-    <div id="timeDisplay" style="position: absolute; top: ${CONFIG.ui.compassSize + 10}px; left: 50%; transform: translateX(-50%); text-align: center; width: 100px;">Day</div>
+    <!-- Outer ring decoration -->
+    <div style="position: absolute; inset: 4px; border: 1px solid rgba(123,220,181,0.2); border-radius: 50%; pointer-events: none;"></div>
+    <div style="position: absolute; inset: 8px; border: 1px solid rgba(123,220,181,0.1); border-radius: 50%; pointer-events: none;"></div>
+
+    <!-- Cardinal directions -->
+    <div style="position: absolute; top: ${cardinalOffset}px; left: 50%; transform: translateX(-50%); font-weight: bold; font-size: 14px; color: var(--accent); text-shadow: 0 0 8px rgba(123,220,181,0.8);">N</div>
+    <div style="position: absolute; bottom: ${cardinalOffset}px; left: 50%; transform: translateX(-50%); font-weight: bold; font-size: 11px; color: rgba(255,255,255,0.5);">S</div>
+    <div style="position: absolute; left: ${cardinalOffset}px; top: 50%; transform: translateY(-50%); font-weight: bold; font-size: 11px; color: rgba(255,255,255,0.5);">W</div>
+    <div style="position: absolute; right: ${cardinalOffset}px; top: 50%; transform: translateY(-50%); font-weight: bold; font-size: 11px; color: rgba(255,255,255,0.5);">E</div>
+
+    <!-- Center dot -->
+    <div style="position: absolute; top: 50%; left: 50%; width: 6px; height: 6px; background: rgba(255,255,255,0.8); border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 8px rgba(255,255,255,0.6); z-index: 2;"></div>
+
+    <!-- Compass needle -->
+    <div id="compassNeedle" style="position: absolute; top: 50%; left: 50%; width: 3px; height: ${compassSize * 0.35}px; background: linear-gradient(180deg, #ff4444 0%, var(--accent) 100%); box-shadow: 0 0 16px rgba(123,220,181,0.8), 0 0 4px rgba(255,68,68,0.6); transform-origin: center bottom; border-radius: 2px; z-index: 1;"></div>
+
+    <!-- Time display -->
+    <div id="timeDisplay" style="
+      position: absolute;
+      top: ${CONFIG.ui.compassSize + 12}px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      width: 120px;
+      color: var(--text);
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    ">Day</div>
   `;
   document.body.appendChild(compass);
   uiElements.compass = compass;
@@ -5283,7 +5419,9 @@ function createObjectSelector() {
     transform: translateX(-50%);
     display: flex;
     gap: 10px;
-    background: rgba(0, 0, 0, 0.7);
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.35);
     padding: 10px;
     border-radius: 5px;
   `;
@@ -5330,15 +5468,17 @@ function updateSelectorContent() {
     <div class="selector-item" data-type="${index}" style="
       width: ${CONFIG.ui.selectorItemSize}px;
       height: ${CONFIG.ui.selectorItemSize}px;
-      background: #333;
-      border: 2px solid ${index === selectedObjectType ? '#ff0' : '#666'};
+      background: rgba(255, 255, 255, 0.06);
+      border: 2px solid ${index === selectedObjectType ? 'var(--accent)' : 'var(--panel-border)'};
       display: flex;
       align-items: center;
       justify-content: center;
-      color: white;
+      color: var(--text);
       cursor: pointer;
       text-align: center;
       font-size: 12px;
+      box-shadow: ${index === selectedObjectType ? '0 0 12px rgba(123,220,181,0.6)' : 'none'};
+      transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
     ">
       <div>${item.icon}<br>${item.label}<br>[${item.key}]</div>
     </div>
@@ -5357,10 +5497,11 @@ function createHealthPanel() {
     left: 50%;
     transform: translateX(-50%);
     padding: 8px 12px;
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
     border-radius: 8px;
-    color: white;
-    font-family: Arial;
+    color: var(--text);
+    font-family: var(--font);
     font-size: 18px;
     min-width: 120px;
     text-align: center;
@@ -5449,11 +5590,13 @@ function createSaveLoadPanel() {
     position: absolute;
     top: ${CONFIG.ui.compassSize + 100}px;
     left: 20px;
-    background: rgba(0, 0, 0, 0.7);
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    box-shadow: 0 10px 28px rgba(0,0,0,0.25);
     padding: 10px;
     border-radius: 5px;
-    color: white;
-    font-family: Arial;
+    color: var(--text);
+    font-family: var(--font);
     font-size: 14px;
   `;
   
@@ -5462,20 +5605,22 @@ function createSaveLoadPanel() {
     <button id="saveButton" style="
       margin: 5px;
       padding: 5px 10px;
-      background: #4CAF50;
-      color: white;
+      background: var(--accent);
+      color: #03120d;
       border: none;
       border-radius: 3px;
       cursor: pointer;
+      font-family: var(--font);
     ">Save Game [F5]</button>
     <button id="loadButton" style="
       margin: 5px;
       padding: 5px 10px;
-      background: #2196F3;
-      color: white;
+      background: #5eb0ff;
+      color: #031426;
       border: none;
       border-radius: 3px;
       cursor: pointer;
+      font-family: var(--font);
     ">Load Game [F9]</button>
     <div id="saveStatus" style="margin-top: 10px; font-size: 12px;"></div>
   `;
@@ -5513,26 +5658,27 @@ function createInventoryPanel() {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    background: rgba(0, 0, 0, 0.9);
+    background: var(--panel);
     padding: 20px;
     border-radius: 10px;
-    border: 2px solid #666;
-    color: white;
-    font-family: Arial;
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    font-family: var(--font);
     font-size: 16px;
     min-width: 300px;
     display: none;
     z-index: 1000;
+    box-shadow: 0 18px 40px rgba(0,0,0,0.45);
   `;
 
   panel.innerHTML = `
-    <div style="margin-bottom: 15px; font-weight: bold; font-size: 20px; text-align: center; border-bottom: 2px solid #666; padding-bottom: 10px;">
+    <div style="margin-bottom: 15px; font-weight: bold; font-size: 20px; text-align: center; border-bottom: 1px solid var(--panel-border); padding-bottom: 10px;">
       📦 Inventory
     </div>
     <div id="inventoryContent" style="margin-top: 10px;">
       <!-- Will be populated by updateInventoryDisplay -->
     </div>
-    <div style="margin-top: 15px; text-align: center; font-size: 12px; color: #999; border-top: 1px solid #666; padding-top: 10px;">
+    <div style="margin-top: 15px; text-align: center; font-size: 12px; color: var(--muted); border-top: 1px solid var(--panel-border); padding-top: 10px;">
       Press [I] to close
     </div>
   `;
@@ -5589,12 +5735,13 @@ function updateInventoryDisplay() {
       justify-content: space-between;
       align-items: center;
       padding: 10px;
-      background: rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.04);
       border-radius: 5px;
-      border: 1px solid ${selectedInventoryResource === resource ? '#4CAF50' : '#666'};
-      color: white;
+      border: 1px solid ${selectedInventoryResource === resource ? 'var(--accent)' : 'var(--panel-border)'};
+      color: var(--text);
       cursor: pointer;
       text-align: left;
+      box-shadow: ${selectedInventoryResource === resource ? '0 0 12px rgba(123,220,181,0.5)' : 'none'};
     `;
 
     item.innerHTML = `
@@ -5627,6 +5774,20 @@ function ensureInventorySelection() {
   if (choice) {
     setSelectedInventoryResource(choice);
   }
+}
+
+/**
+ * Toggle the instructions panel visibility
+ * @returns {boolean} True if instructions are now visible, false if hidden
+ */
+function toggleInstructions() {
+  const instructions = document.getElementById('instructions');
+  if (!instructions) return false;
+
+  const isVisible = instructions.style.display !== 'none';
+  instructions.style.display = isVisible ? 'none' : 'block';
+
+  return !isVisible;
 }
 
 
@@ -6522,6 +6683,17 @@ function loadHouseInterior(houseUuid) {
  */
 
 
+const digitKeyToIndex = {
+  Digit0: 0,
+  Digit1: 1,
+  Digit2: 2,
+  Digit3: 3,
+  Digit4: 4,
+  Digit5: 5,
+  Digit6: 6,
+  Digit7: 7
+};
+
 /**
  * Setup all event listeners
  */
@@ -6553,6 +6725,10 @@ function setupEventListeners() {
  * @param {KeyboardEvent} event
  */
 function onKeyDown(event) {
+  if (tryHandleDigitSelection(event.code)) {
+    return;
+  }
+
   switch (event.code) {
     case 'KeyW':
     case 'ArrowUp':
@@ -6611,38 +6787,6 @@ function onKeyDown(event) {
     case 'KeyB':
       buildObject();
       break;
-    case 'Digit0':
-      setSelectedObjectType(0); // Fists
-      updateObjectSelector();
-      break;
-    case 'Digit1':
-      setSelectedObjectType(1); // Tree
-      updateObjectSelector();
-      break;
-    case 'Digit2':
-      setSelectedObjectType(2); // Rock
-      updateObjectSelector();
-      break;
-    case 'Digit3':
-      setSelectedObjectType(3); // House
-      updateObjectSelector();
-      break;
-    case 'Digit4':
-      setSelectedObjectType(4); // Cow
-      updateObjectSelector();
-      break;
-    case 'Digit5':
-      setSelectedObjectType(5); // Pig
-      updateObjectSelector();
-      break;
-    case 'Digit6':
-      setSelectedObjectType(6); // Horse
-      updateObjectSelector();
-      break;
-    case 'Digit7':
-      setSelectedObjectType(7); // Dog (when inside)
-      updateObjectSelector();
-      break;
     case 'F5':
       event.preventDefault(); // Prevent browser refresh
       handleSave();
@@ -6664,6 +6808,9 @@ function onKeyDown(event) {
     case 'KeyG':
       handleDropResource();
       break;
+    case 'KeyH':
+      toggleInstructions();
+      break;
   }
 }
 
@@ -6672,6 +6819,10 @@ function onKeyDown(event) {
  * @param {KeyboardEvent} event
  */
 function onKeyUp(event) {
+  if (digitKeyToIndex[event.code] !== undefined) {
+    return; // Number keys don't hold state; ignore on keyup.
+  }
+
   switch (event.code) {
     case 'KeyW':
     case 'ArrowUp':
@@ -6694,6 +6845,14 @@ function onKeyUp(event) {
       keys.sprint = false;
       break;
   }
+}
+
+function tryHandleDigitSelection(code) {
+  const slot = digitKeyToIndex[code];
+  if (slot === undefined) return false;
+  setSelectedObjectType(slot);
+  updateObjectSelector();
+  return true;
 }
 
 /**
@@ -7630,6 +7789,20 @@ function updateAnimals(delta) {
  */
 function init() {
   try {
+    if (!window.THREE) {
+      throw new Error('Three.js is not available on this page');
+    }
+
+    const webglSupported = (() => {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      return !!gl;
+    })();
+    if (!webglSupported) {
+      alert('WebGL is not supported in this browser. Please update or enable hardware acceleration.');
+      return;
+    }
+
     // Clock for time tracking
     setClock(new THREE.Clock());
     
@@ -7725,13 +7898,24 @@ function animate() {
  * Clean up resources when the window is closed
  */
 function cleanup() {
-  // Dispose of all world objects
-  worldObjects.forEach(object => {
-    disposeObject(object);
+  const collections = [worldObjects, interiorObjects, worldAnimals, interiorAnimals, mobs];
+  collections.forEach(list => {
+    list.forEach(disposeObject);
   });
+
+  if (worldState.interiorGroup) {
+    disposeObject(worldState.interiorGroup);
+  }
+
+  if (interactableObjects) {
+    interactableObjects.children.slice().forEach(disposeObject);
+  }
   
   // Dispose of renderer
   if (renderer) {
+    if (renderer.renderLists?.dispose) {
+      renderer.renderLists.dispose();
+    }
     renderer.dispose();
   }
   

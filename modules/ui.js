@@ -50,16 +50,55 @@ function createCompass() {
     left: 20px;
     width: ${CONFIG.ui.compassSize}px;
     height: ${CONFIG.ui.compassSize}px;
-    background: rgba(0, 0, 0, 0.5);
+    background: linear-gradient(135deg, rgba(30,30,35,0.95) 0%, rgba(20,20,25,0.95) 100%);
+    border: 2px solid var(--panel-border);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4), inset 0 1px 3px rgba(255,255,255,0.1);
     border-radius: 50%;
-    color: white;
-    font-family: Arial;
+    color: var(--text);
+    font-family: var(--font);
     font-size: 12px;
+    backdrop-filter: blur(10px);
   `;
+
+  const compassSize = CONFIG.ui.compassSize;
+  const centerOffset = compassSize / 2;
+  const cardinalOffset = 8;
+
   compass.innerHTML = `
-    <div style="position: absolute; top: 5px; left: 50%; transform: translateX(-50%);">N</div>
-    <div id="compassNeedle" style="position: absolute; top: 50%; left: 50%; width: 2px; height: 30px; background: red; transform-origin: center bottom;"></div>
-    <div id="timeDisplay" style="position: absolute; top: ${CONFIG.ui.compassSize + 10}px; left: 50%; transform: translateX(-50%); text-align: center; width: 100px;">Day</div>
+    <!-- Outer ring decoration -->
+    <div style="position: absolute; inset: 4px; border: 1px solid rgba(123,220,181,0.2); border-radius: 50%; pointer-events: none;"></div>
+    <div style="position: absolute; inset: 8px; border: 1px solid rgba(123,220,181,0.1); border-radius: 50%; pointer-events: none;"></div>
+
+    <!-- Cardinal directions -->
+    <div style="position: absolute; top: ${cardinalOffset}px; left: 50%; transform: translateX(-50%); font-weight: bold; font-size: 14px; color: var(--accent); text-shadow: 0 0 8px rgba(123,220,181,0.8);">N</div>
+    <div style="position: absolute; bottom: ${cardinalOffset}px; left: 50%; transform: translateX(-50%); font-weight: bold; font-size: 11px; color: rgba(255,255,255,0.5);">S</div>
+    <div style="position: absolute; left: ${cardinalOffset}px; top: 50%; transform: translateY(-50%); font-weight: bold; font-size: 11px; color: rgba(255,255,255,0.5);">W</div>
+    <div style="position: absolute; right: ${cardinalOffset}px; top: 50%; transform: translateY(-50%); font-weight: bold; font-size: 11px; color: rgba(255,255,255,0.5);">E</div>
+
+    <!-- Center dot -->
+    <div style="position: absolute; top: 50%; left: 50%; width: 6px; height: 6px; background: rgba(255,255,255,0.8); border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 8px rgba(255,255,255,0.6); z-index: 2;"></div>
+
+    <!-- Compass needle -->
+    <div id="compassNeedle" style="position: absolute; top: 50%; left: 50%; width: 3px; height: ${compassSize * 0.35}px; background: linear-gradient(180deg, #ff4444 0%, var(--accent) 100%); box-shadow: 0 0 16px rgba(123,220,181,0.8), 0 0 4px rgba(255,68,68,0.6); transform-origin: center bottom; border-radius: 2px; z-index: 1;"></div>
+
+    <!-- Time display -->
+    <div id="timeDisplay" style="
+      position: absolute;
+      top: ${CONFIG.ui.compassSize + 12}px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      width: 120px;
+      color: var(--text);
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    ">Day</div>
   `;
   document.body.appendChild(compass);
   uiElements.compass = compass;
@@ -77,7 +116,9 @@ function createObjectSelector() {
     transform: translateX(-50%);
     display: flex;
     gap: 10px;
-    background: rgba(0, 0, 0, 0.7);
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.35);
     padding: 10px;
     border-radius: 5px;
   `;
@@ -124,15 +165,17 @@ export function updateSelectorContent() {
     <div class="selector-item" data-type="${index}" style="
       width: ${CONFIG.ui.selectorItemSize}px;
       height: ${CONFIG.ui.selectorItemSize}px;
-      background: #333;
-      border: 2px solid ${index === selectedObjectType ? '#ff0' : '#666'};
+      background: rgba(255, 255, 255, 0.06);
+      border: 2px solid ${index === selectedObjectType ? 'var(--accent)' : 'var(--panel-border)'};
       display: flex;
       align-items: center;
       justify-content: center;
-      color: white;
+      color: var(--text);
       cursor: pointer;
       text-align: center;
       font-size: 12px;
+      box-shadow: ${index === selectedObjectType ? '0 0 12px rgba(123,220,181,0.6)' : 'none'};
+      transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
     ">
       <div>${item.icon}<br>${item.label}<br>[${item.key}]</div>
     </div>
@@ -151,10 +194,11 @@ function createHealthPanel() {
     left: 50%;
     transform: translateX(-50%);
     padding: 8px 12px;
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
     border-radius: 8px;
-    color: white;
-    font-family: Arial;
+    color: var(--text);
+    font-family: var(--font);
     font-size: 18px;
     min-width: 120px;
     text-align: center;
@@ -243,11 +287,13 @@ function createSaveLoadPanel() {
     position: absolute;
     top: ${CONFIG.ui.compassSize + 100}px;
     left: 20px;
-    background: rgba(0, 0, 0, 0.7);
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    box-shadow: 0 10px 28px rgba(0,0,0,0.25);
     padding: 10px;
     border-radius: 5px;
-    color: white;
-    font-family: Arial;
+    color: var(--text);
+    font-family: var(--font);
     font-size: 14px;
   `;
   
@@ -256,20 +302,22 @@ function createSaveLoadPanel() {
     <button id="saveButton" style="
       margin: 5px;
       padding: 5px 10px;
-      background: #4CAF50;
-      color: white;
+      background: var(--accent);
+      color: #03120d;
       border: none;
       border-radius: 3px;
       cursor: pointer;
+      font-family: var(--font);
     ">Save Game [F5]</button>
     <button id="loadButton" style="
       margin: 5px;
       padding: 5px 10px;
-      background: #2196F3;
-      color: white;
+      background: #5eb0ff;
+      color: #031426;
       border: none;
       border-radius: 3px;
       cursor: pointer;
+      font-family: var(--font);
     ">Load Game [F9]</button>
     <div id="saveStatus" style="margin-top: 10px; font-size: 12px;"></div>
   `;
@@ -307,26 +355,27 @@ function createInventoryPanel() {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    background: rgba(0, 0, 0, 0.9);
+    background: var(--panel);
     padding: 20px;
     border-radius: 10px;
-    border: 2px solid #666;
-    color: white;
-    font-family: Arial;
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    font-family: var(--font);
     font-size: 16px;
     min-width: 300px;
     display: none;
     z-index: 1000;
+    box-shadow: 0 18px 40px rgba(0,0,0,0.45);
   `;
 
   panel.innerHTML = `
-    <div style="margin-bottom: 15px; font-weight: bold; font-size: 20px; text-align: center; border-bottom: 2px solid #666; padding-bottom: 10px;">
+    <div style="margin-bottom: 15px; font-weight: bold; font-size: 20px; text-align: center; border-bottom: 1px solid var(--panel-border); padding-bottom: 10px;">
       📦 Inventory
     </div>
     <div id="inventoryContent" style="margin-top: 10px;">
       <!-- Will be populated by updateInventoryDisplay -->
     </div>
-    <div style="margin-top: 15px; text-align: center; font-size: 12px; color: #999; border-top: 1px solid #666; padding-top: 10px;">
+    <div style="margin-top: 15px; text-align: center; font-size: 12px; color: var(--muted); border-top: 1px solid var(--panel-border); padding-top: 10px;">
       Press [I] to close
     </div>
   `;
@@ -383,12 +432,13 @@ export function updateInventoryDisplay() {
       justify-content: space-between;
       align-items: center;
       padding: 10px;
-      background: rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.04);
       border-radius: 5px;
-      border: 1px solid ${selectedInventoryResource === resource ? '#4CAF50' : '#666'};
-      color: white;
+      border: 1px solid ${selectedInventoryResource === resource ? 'var(--accent)' : 'var(--panel-border)'};
+      color: var(--text);
       cursor: pointer;
       text-align: left;
+      box-shadow: ${selectedInventoryResource === resource ? '0 0 12px rgba(123,220,181,0.5)' : 'none'};
     `;
 
     item.innerHTML = `
@@ -421,4 +471,18 @@ function ensureInventorySelection() {
   if (choice) {
     setSelectedInventoryResource(choice);
   }
+}
+
+/**
+ * Toggle the instructions panel visibility
+ * @returns {boolean} True if instructions are now visible, false if hidden
+ */
+export function toggleInstructions() {
+  const instructions = document.getElementById('instructions');
+  if (!instructions) return false;
+
+  const isVisible = instructions.style.display !== 'none';
+  instructions.style.display = isVisible ? 'none' : 'block';
+
+  return !isVisible;
 }

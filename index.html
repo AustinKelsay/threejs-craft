@@ -25,23 +25,48 @@
     <aside id="gameUI">
       <!-- Instructions panel -->
       <section id="instructions" role="complementary" aria-label="Game controls">
-        <h2>🎮 First Person Adventure</h2>
+        <h2>🎮 How to Play</h2>
+        <p style="margin: 10px 0; font-size: 13px; opacity: 0.8;">Press <kbd>H</kbd> to hide/show this menu</p>
+
+        <h3 style="margin-top: 15px; font-size: 14px; color: #7bdcb5;">Movement & Camera</h3>
         <ul>
-          <li>Click game to use mouse look</li>
+          <li><kbd>Click</kbd> to capture mouse and look around</li>
           <li><kbd>WASD</kbd> or <kbd>↑↓←→</kbd> to move</li>
           <li><kbd>SHIFT</kbd> to sprint</li>
-          <li><kbd>Q</kbd>/<kbd>E</kbd> to rotate objects/turn camera</li>
-          <li><kbd>SPACE</kbd> to jump/remove objects</li>
-          <li><kbd>B</kbd> to build</li>
-          <li><kbd>Click</kbd> trees/rocks with fists for wood/stone</li>
-          <li><kbd>Click</kbd> dropped resources to pick up</li>
-          <li><kbd>I</kbd> to open inventory</li>
-          <li>In inventory: click a resource, then press <kbd>G</kbd> to drop 1</li>
-          <li>Punch spiders with fists; hearts in top-right show health</li>
-          <li>If hearts empty, you respawn (game restarts)</li>
-          <li><kbd>1</kbd>-<kbd>7</kbd> to select objects/animals (dragon outside, dog inside)</li>
-          <li><kbd>F5</kbd> save / <kbd>F9</kbd> load game</li>
+          <li><kbd>SPACE</kbd> to jump</li>
+          <li><kbd>Q</kbd>/<kbd>E</kbd> to rotate camera (when not building)</li>
           <li><kbd>ESC</kbd> to release mouse</li>
+        </ul>
+
+        <h3 style="margin-top: 15px; font-size: 14px; color: #7bdcb5;">Building</h3>
+        <ul>
+          <li><kbd>0</kbd>-<kbd>7</kbd> to select items (changes with location)</li>
+          <li><kbd>Q</kbd>/<kbd>E</kbd> to rotate object preview</li>
+          <li><kbd>B</kbd> to place selected object</li>
+          <li><kbd>SPACE</kbd> to remove object you're looking at</li>
+        </ul>
+
+        <h3 style="margin-top: 15px; font-size: 14px; color: #7bdcb5;">Resources & Inventory</h3>
+        <ul>
+          <li><kbd>Click</kbd> trees/rocks with fists to gather wood/stone</li>
+          <li><kbd>I</kbd> to open/close inventory</li>
+          <li>In inventory: click a resource, then <kbd>G</kbd> to drop 1</li>
+          <li><kbd>Click</kbd> dropped items to pick them up</li>
+        </ul>
+
+        <h3 style="margin-top: 15px; font-size: 14px; color: #7bdcb5;">Combat & Creatures</h3>
+        <ul>
+          <li>Fists (slot 0) punch creatures and break objects</li>
+          <li>Punch spiders to defend yourself</li>
+          <li>Hearts at top center show your health</li>
+          <li><kbd>Click</kbd> dragons to mount them</li>
+          <li><kbd>Backspace</kbd> to dismount</li>
+        </ul>
+
+        <h3 style="margin-top: 15px; font-size: 14px; color: #7bdcb5;">Save & Load</h3>
+        <ul>
+          <li><kbd>F5</kbd> to save your game</li>
+          <li><kbd>F9</kbd> to load your game</li>
         </ul>
       </section>
     </aside>
