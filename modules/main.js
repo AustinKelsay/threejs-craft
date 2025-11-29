@@ -14,13 +14,16 @@ import {
 import { createWorld, createLighting } from './world.js';
 import { createInitialWorldObjects } from './worldObjects.js';
 import { createInitialAnimals, updateAnimals } from './animals.js';
+import { createInitialMobs, updateMobs } from './mobs.js';
 import { createUIElements } from './ui.js';
+import { createHands, updateHands } from './hands.js';
 import { updatePlayer } from './player.js';
 import { updateDayNightCycle } from './dayNight.js';
 import { updateObjectHighlight } from './building.js';
 import { setupEventListeners, onWindowResize, removeEventListeners } from './input.js';
 import { updateCameraRotation } from './camera.js';
 import { disposeObject } from './utils.js';
+import { updateHealthRegen } from './health.js';
 
 /**
  * Initialize the game
@@ -45,6 +48,7 @@ function init() {
     
     // Initialize camera rotation properly
     updateCameraRotation();
+    scene.add(camera);
     
     // Renderer setup
     const canvas = document.getElementById('gameCanvas');
@@ -69,6 +73,8 @@ function init() {
     createLighting();
     createInitialWorldObjects(scene);
     createInitialAnimals(scene);
+    createInitialMobs();
+    createHands();
     
     // Setup controls
     setupEventListeners();
@@ -97,6 +103,8 @@ function animate() {
   const delta = clock.getDelta();
   
   updatePlayer(delta);
+  updateHealthRegen(delta);
+  updateHands(delta);
   
   // Update different systems based on location
   if (!worldState.isInside) {
@@ -105,6 +113,7 @@ function animate() {
   
   // Animals update regardless of location (different animals inside/outside)
   updateAnimals(delta);
+  updateMobs(delta);
   
   updateObjectHighlight();
   

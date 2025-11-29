@@ -6,6 +6,11 @@ import { CONFIG } from './config.js';
 import { camera, player, keys, mouseControls, worldState } from './gameState.js';
 import { getForwardVector, getRightVector, applyCameraMovement } from './camera.js';
 
+// Reusable vectors to minimize allocations in the hot update loop
+const moveVector = new THREE.Vector3();
+const forwardVec = new THREE.Vector3();
+const rightVec = new THREE.Vector3();
+
 /**
  * Update player movement and physics
  * @param {number} delta - Time since last frame
@@ -15,9 +20,9 @@ export function updatePlayer(delta) {
   player.velocity.y -= CONFIG.player.gravity * delta;
   
   // Calculate movement direction using camera vectors
-  const moveVector = new THREE.Vector3();
-  const forward = getForwardVector();
-  const right = getRightVector();
+  moveVector.set(0, 0, 0);
+  const forward = getForwardVector(forwardVec);
+  const right = getRightVector(rightVec);
   
   // Add movement based on input
   if (keys.forward) moveVector.add(forward);
@@ -25,10 +30,11 @@ export function updatePlayer(delta) {
   if (keys.left) moveVector.add(right);  // Fixed: was reversed
   if (keys.right) moveVector.sub(right); // Fixed: was reversed
   
-  // Normalize and scale by speed
+  // Normalize and scale by speed (use sprint speed if Shift is held)
   if (moveVector.length() > 0) {
     moveVector.normalize();
-    moveVector.multiplyScalar(CONFIG.player.speed * delta);
+    const currentSpeed = keys.sprint ? CONFIG.player.sprintSpeed : CONFIG.player.speed;
+    moveVector.multiplyScalar(currentSpeed * delta);
   }
   
   // Update position
@@ -44,10 +50,12 @@ export function updatePlayer(delta) {
   
   // World boundaries
   if (worldState.isInside) {
-    // Interior boundaries
-    const interiorBoundary = CONFIG.interior.roomSize / 2 - 0.5; // Leave space for walls
-    camera.position.x = THREE.MathUtils.clamp(camera.position.x, -interiorBoundary, interiorBoundary);
-    camera.position.z = THREE.MathUtils.clamp(camera.position.z, -interiorBoundary, interiorBoundary);
+    // Interior boundaries - use dynamic room dimensions if available
+    const interior = worldState.currentInterior;
+    const boundaryX = (interior ? interior.roomWidth : CONFIG.interior.roomSize) / 2 - 0.5;
+    const boundaryZ = (interior ? interior.roomDepth : CONFIG.interior.roomSize) / 2 - 0.5;
+    camera.position.x = THREE.MathUtils.clamp(camera.position.x, -boundaryX, boundaryX);
+    camera.position.z = THREE.MathUtils.clamp(camera.position.z, -boundaryZ, boundaryZ);
   } else {
     // Outside world boundaries
     const boundary = CONFIG.world.size / 2;

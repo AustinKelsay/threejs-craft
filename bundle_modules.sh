@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 # Bundle all modules into a single bundle.js file
 # This maintains the game as a static HTML file that can be opened directly
@@ -13,10 +14,13 @@ echo "" >> bundle.js
 # Order matters - dependencies first
 modules=(
     "config.js"
+    "resources.js"
     "gameState.js"
     "utils.js"
     "camera.js"
+    "houseGenerator.js"
     "worldObjects.js"
+    "droppedResources.js"
     "worldAnimals.js"
     "interiorObjects.js"
     "interiorAnimals.js"
@@ -24,8 +28,11 @@ modules=(
     "interior.js"
     "building.js"
     "player.js"
+    "hands.js"
     "dayNight.js"
     "ui.js"
+    "health.js"
+    "mobs.js"
     "saveLoad.js"
     "input.js"
     "animals.js"

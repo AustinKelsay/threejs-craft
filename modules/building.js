@@ -10,11 +10,16 @@ import {
   ghostRotation, lastGhostType, setLastGhostType, lastGhostRotation, setLastGhostRotation
 } from './gameState.js';
 import { createTree, createRock, createHouse } from './worldObjects.js';
-import { createCow, createPig, createHorse } from './worldAnimals.js';
+import { createHouseGhostPreview, generateHouseStyle } from './houseGenerator.js';
+import { createCow, createPig, createHorse, createDragon } from './worldAnimals.js';
 import { createCat, createDog } from './interiorAnimals.js';
 import { createChair, createTable, createCouch, createTV, createBed } from './interiorObjects.js';
 import { getForwardVector } from './camera.js';
 import { disposeObject, findParentObject } from './utils.js';
+
+// Reusable scratch values to avoid per-frame allocations (unique names for bundler)
+const centerPointer = new THREE.Vector2(0, 0);
+const BUILD_FORWARD_VEC = new THREE.Vector3();
 
 /**
  * Build an object at the current build position
@@ -76,6 +81,9 @@ export function buildObject() {
         case 'horse':
           newObject = createHorse(buildPos.x, buildPos.z);
           break;
+        case 'dragon':
+          newObject = createDragon(buildPos.x, buildPos.z);
+          break;
       }
     }
     // Apply rotation to the newly created object
@@ -120,7 +128,7 @@ export function removeObject() {
       }
       
       // Remove from world animals if it's an animal
-      const animalTypes = ['cow', 'pig', 'horse'];
+      const animalTypes = ['cow', 'pig', 'horse', 'dragon'];
       if (animalTypes.includes(highlightedObject.userData.type)) {
         const animalIndex = worldAnimals.indexOf(highlightedObject);
         if (animalIndex > -1) {
@@ -146,7 +154,7 @@ export function removeObject() {
  */
 export function getBuildPosition() {
   // Get forward direction for building placement
-  const forward = getForwardVector();
+  const forward = getForwardVector(BUILD_FORWARD_VEC);
   
   // Variable distance based on camera pitch (looking down = closer, looking up = farther)
   const pitchFactor = 1 - (camera.rotation.x / (Math.PI / 2)); // 0 when looking down, 2 when looking up
@@ -154,14 +162,17 @@ export function getBuildPosition() {
   const distance = baseDistance * (0.5 + pitchFactor * 0.5);
   
   const buildPos = camera.position.clone();
-  buildPos.add(forward.multiplyScalar(distance));
+  buildPos.addScaledVector(forward, distance);
   buildPos.y = 0;
   
   // Ensure build position is within room bounds when inside
   if (worldState.isInside) {
-    const roomHalfSize = CONFIG.interior.roomSize / 2 - 1; // Leave some padding
-    buildPos.x = Math.max(-roomHalfSize, Math.min(roomHalfSize, buildPos.x));
-    buildPos.z = Math.max(-roomHalfSize, Math.min(roomHalfSize, buildPos.z));
+    // Use dynamic room dimensions if available
+    const interior = worldState.currentInterior;
+    const halfWidth = (interior ? interior.roomWidth : CONFIG.interior.roomSize) / 2 - 1;
+    const halfDepth = (interior ? interior.roomDepth : CONFIG.interior.roomSize) / 2 - 1;
+    buildPos.x = Math.max(-halfWidth, Math.min(halfWidth, buildPos.x));
+    buildPos.z = Math.max(-halfDepth, Math.min(halfDepth, buildPos.z));
   }
   
   return buildPos;
@@ -172,7 +183,7 @@ export function getBuildPosition() {
  */
 export function updateObjectHighlight() {
   // Cast ray from camera center
-  raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+  raycaster.setFromCamera(centerPointer, camera);
   
   // Include both world and interior objects
   const objectsToCheck = worldState.isInside ? 
@@ -209,10 +220,17 @@ export function updateObjectHighlight() {
       parentObject = parentObject.parent;
     }
     
-    // Check if the parent is removable
-    if (parentObject && parentObject.userData && parentObject.userData.removable && distance < CONFIG.building.distance) {
-      setHighlightedObject(parentObject);
-      highlightObject(parentObject);
+    // Check if the parent is interactable within range
+    if (parentObject && parentObject.userData && distance < CONFIG.building.distance) {
+      const type = parentObject.userData.type;
+      const isPickup = type === 'droppedResource';
+      const isMob = type === 'mob';
+      const isRemovable = parentObject.userData.removable === true;
+
+      if (isPickup || isRemovable || isMob) {
+        setHighlightedObject(parentObject);
+        highlightObject(parentObject);
+      }
     }
   }
   
@@ -383,23 +401,14 @@ function updateGhostObject() {
         break;
         
       case 'house':
-        // House with door to show front
-        const houseGhost = new THREE.Mesh(
-          new THREE.BoxGeometry(4, 3, 4),
-          ghostMaterial.clone()
-        );
-        houseGhost.material.color.set(0xffaa00);
-        houseGhost.position.y = 1.5;
-        ghostGroup.add(houseGhost);
-        
-        // Add door to show front
-        const doorGhost = new THREE.Mesh(
-          new THREE.BoxGeometry(0.8, 1.6, 0.1),
-          ghostMaterial.clone()
-        );
-        doorGhost.material.color.set(0x654321);
-        doorGhost.position.set(0, 0.8, 2.05);
-        ghostGroup.add(doorGhost);
+        // Dynamic house ghost preview using the house generator
+        const housePreview = createHouseGhostPreview();
+        // Copy all children from the preview to our ghost group
+        while (housePreview.children.length > 0) {
+          const child = housePreview.children[0];
+          housePreview.remove(child);
+          ghostGroup.add(child);
+        }
         break;
         
       case 'cow':
@@ -490,6 +499,68 @@ function updateGhostObject() {
         horseHead.material.color.set(0x654321);
         horseHead.position.set(1.4, 1.7, 0);
         ghostGroup.add(horseHead);
+        break;
+      
+      case 'dragon':
+        // Serpentine body silhouette
+        const dragonBody = new THREE.Mesh(
+          new THREE.SphereGeometry(1.5, 10, 8),
+          ghostMaterial.clone()
+        );
+        dragonBody.material.color.set(0x2d5a4a);
+        dragonBody.scale.set(1.8, 0.75, 0.85);
+        dragonBody.position.y = 0.9;
+        ghostGroup.add(dragonBody);
+        
+        // Neck curve
+        const dragonNeck = new THREE.Mesh(
+          new THREE.SphereGeometry(0.55, 8, 6),
+          ghostMaterial.clone()
+        );
+        dragonNeck.material.color.set(0x2d5a4a);
+        dragonNeck.position.set(1.6, 1.35, 0);
+        ghostGroup.add(dragonNeck);
+        
+        // Head
+        const dragonHead = new THREE.Mesh(
+          new THREE.SphereGeometry(0.45, 8, 6),
+          ghostMaterial.clone()
+        );
+        dragonHead.material.color.set(0x2d5a4a);
+        dragonHead.scale.set(1.4, 0.9, 0.9);
+        dragonHead.position.set(2.1, 1.6, 0);
+        ghostGroup.add(dragonHead);
+        
+        // Tail
+        const dragonTail = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.25, 0.08, 2.8, 6),
+          ghostMaterial.clone()
+        );
+        dragonTail.material.color.set(0x2d5a4a);
+        dragonTail.position.set(-2.2, 0.5, 0);
+        dragonTail.rotation.z = Math.PI / 2;
+        ghostGroup.add(dragonTail);
+        
+        // Wings (curved shapes)
+        const wingShape = new THREE.Shape();
+        wingShape.moveTo(0, 0);
+        wingShape.quadraticCurveTo(2.0, 3.0, 0.5, 4.5);
+        wingShape.quadraticCurveTo(-0.5, 3.5, -1.0, 2.5);
+        wingShape.quadraticCurveTo(-0.5, 1.2, 0, 0);
+        const wingGeo = new THREE.ShapeGeometry(wingShape);
+        
+        const dragonWingL = new THREE.Mesh(wingGeo, ghostMaterial.clone());
+        dragonWingL.material.color.set(0x3d6b5a);
+        dragonWingL.position.set(0.3, 1.1, 0.5);
+        dragonWingL.rotation.set(0, Math.PI / 2, 0.2);
+        ghostGroup.add(dragonWingL);
+        
+        const dragonWingR = new THREE.Mesh(wingGeo, ghostMaterial.clone());
+        dragonWingR.material.color.set(0x3d6b5a);
+        dragonWingR.position.set(0.3, 1.1, -0.5);
+        dragonWingR.rotation.set(0, -Math.PI / 2, 0.2);
+        dragonWingR.scale.x = -1;
+        ghostGroup.add(dragonWingR);
         break;
         
       // Interior objects

@@ -9,9 +9,10 @@ JSCraft 3D is an educational Three.js-based first-person exploration game for ki
 ## Development Commands
 
 - **Run the game**: Open `index.html` in a web browser (no server required)
-- **No build process**: Pure HTML/CSS/JS project - `bundle.js` is the pre-bundled version of the modules
+- **Bundle modules**: `bash bundle_modules.sh` - Rebuilds `bundle.js` from `modules/` directory (REQUIRED after any module changes)
+- **Local development server**: `python3 -m http.server 8000` - Serves files at `http://localhost:8000` (improves pointer-lock behavior vs `file://`)
 - **No package.json**: No npm dependencies or build scripts
-- **No linting/testing**: Educational project focused on simplicity
+- **No automated tests**: Manual smoke testing only (see Testing section below)
 
 ## High-Level Architecture
 
@@ -20,6 +21,14 @@ JSCraft 3D is an educational Three.js-based first-person exploration game for ki
 The game has two deployment modes:
 1. **Direct browser mode**: Uses `bundle.js` (pre-bundled) loaded from `index.html`
 2. **Development mode**: ES6 modules in the `modules/` directory for better code organization
+
+### Build System
+
+**CRITICAL**: `bundle.js` is auto-generated from `modules/` - NEVER edit it directly!
+- After editing any module, run `bash bundle_modules.sh` to regenerate `bundle.js`
+- The script processes modules in dependency order (defined in `bundle_modules.sh`)
+- Adding new modules requires updating the module array in `bundle_modules.sh`
+- Commits with module changes MUST include the regenerated `bundle.js`
 
 ### Module Organization
 
@@ -37,6 +46,7 @@ All game logic is split into focused modules:
 - `building.js`: Context-aware object placement/removal system with raycasting
 - `ui.js`: Dynamic UI elements (crosshair, compass, context-sensitive object selector)
 - `dayNight.js`: Sun/moon movement and lighting transitions
+- `saveLoad.js`: Save/load system using browser localStorage (F5/F9 shortcuts)
 - `utils.js`: Helper functions (object disposal, random generation)
 
 ### Core Technical Architecture
@@ -112,3 +122,40 @@ Animals use autonomous behavior patterns:
   - Individual properties (speed, wander radius, idle time)
   - Simple leg animations during movement
   - Boundary detection preventing wall clipping
+
+## Coding Style & Conventions
+
+- **Language**: ES6 JavaScript modules with `const`/`let`, semicolons, single quotes
+- **Indentation**: 2 spaces (no tabs)
+- **Naming**: `camelCase` for functions/files, `SCREAMING_SNAKE_CASE` for constants (e.g., `CONFIG`)
+- **Documentation**: Concise JSDoc-style headers for non-obvious modules; inline comments only where Three.js nuances require explanation
+- **State Management**: All shared state in `gameState.js` with getter/setter functions
+- **Configuration**: All tunable values in `CONFIG` object in `config.js`
+- **Memory Management**: Always use `disposeObject()` from `utils.js` to clean up Three.js resources
+
+## Testing & Verification
+
+**No automated tests** - Use manual smoke testing after bundling:
+1. Load the game and verify movement (WASD) and mouse-look work
+2. Test building system: place and remove objects outside (trees, rocks, houses, animals)
+3. Test interior system: enter houses, place/remove furniture and pets
+4. Verify day/night cycle runs with proper lighting and shadows
+5. Test save/load: Press F5 to save, F9 to load, verify state persistence
+6. Check console for errors during all operations
+
+When fixing bugs, include reproduction steps in commit messages for manual verification.
+
+## Performance Considerations
+
+- **Client-side only**: All data lives in browser `localStorage` - no network calls
+- **Object limits**: Monitor object counts via `CONFIG.objects` settings
+- **Shadow quality**: Adjust `CONFIG.renderer.shadowMapSize` (default 2048) if performance issues occur
+- **Geometry reuse**: Reuse geometries/materials where possible to maintain stable frame times
+- **Fog optimization**: Distance fog (`CONFIG.world.fogFar`) reduces rendering load
+
+## Commit Guidelines
+
+- **Message format**: Short, present-tense summaries (e.g., "add interior pets", "fix door highlighting")
+- **Module changes**: Always include regenerated `bundle.js` in the same commit
+- **Grouping**: Group related changes together; avoid formatting-only commits
+- **Bundle verification**: Test `bundle.js` works before committing

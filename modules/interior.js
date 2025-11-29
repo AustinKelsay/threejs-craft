@@ -1,5 +1,8 @@
 /**
- * Interior world system and furniture creation
+ * Interior World System
+ * 
+ * Creates dynamic interior rooms that match the exterior house style.
+ * Each house has its own unique interior based on its dimensions and colors.
  */
 
 import { CONFIG } from './config.js';
@@ -9,7 +12,70 @@ import { addFurnitureToInterior } from './interiorObjects.js';
 import { createCat, createDog } from './interiorAnimals.js';
 
 /**
- * Creates an interior room environment
+ * Computes interior room properties from a house style
+ * Interior is slightly larger than exterior to feel spacious
+ * @param {Object} houseStyle - The house style object from houseGenerator
+ * @returns {Object} Interior properties (dimensions and colors)
+ */
+function computeInteriorFromStyle(houseStyle) {
+  const palettes = CONFIG.house.palettes;
+  
+  // Interior is scaled up from house exterior (feels bigger inside)
+  const interiorScale = 1.6;
+  const roomWidth = houseStyle.width * interiorScale;
+  const roomDepth = houseStyle.depth * interiorScale;
+  const roomHeight = Math.max(2.8, houseStyle.height * 0.85); // Min 2.8m ceiling
+  
+  // Derive interior colors from house palette
+  const exteriorWallColor = palettes.walls[houseStyle.wallColorIndex];
+  const doorColor = palettes.doors[houseStyle.doorColorIndex];
+  const trimColor = palettes.trim[houseStyle.trimColorIndex];
+  
+  // Make interior walls lighter/warmer than exterior
+  const interiorWallColor = lightenColor(exteriorWallColor, 0.15);
+  // Floor uses a wood tone based on trim color
+  const floorColor = darkenColor(trimColor, 0.3);
+  
+  return {
+    roomWidth,
+    roomDepth,
+    roomHeight,
+    wallColor: interiorWallColor,
+    floorColor,
+    ceilingColor: 0xFFFFF8, // Warm white ceiling
+    doorColor,
+    trimColor
+  };
+}
+
+/**
+ * Lightens a hex color by a percentage
+ * @param {number} color - Hex color value
+ * @param {number} percent - Amount to lighten (0-1)
+ * @returns {number} Lightened hex color
+ */
+function lightenColor(color, percent) {
+  const r = Math.min(255, ((color >> 16) & 0xFF) + Math.floor(255 * percent));
+  const g = Math.min(255, ((color >> 8) & 0xFF) + Math.floor(255 * percent));
+  const b = Math.min(255, (color & 0xFF) + Math.floor(255 * percent));
+  return (r << 16) | (g << 8) | b;
+}
+
+/**
+ * Darkens a hex color by a percentage
+ * @param {number} color - Hex color value
+ * @param {number} percent - Amount to darken (0-1)
+ * @returns {number} Darkened hex color
+ */
+function darkenColor(color, percent) {
+  const r = Math.max(0, Math.floor(((color >> 16) & 0xFF) * (1 - percent)));
+  const g = Math.max(0, Math.floor(((color >> 8) & 0xFF) * (1 - percent)));
+  const b = Math.max(0, Math.floor((color & 0xFF) * (1 - percent)));
+  return (r << 16) | (g << 8) | b;
+}
+
+/**
+ * Creates an interior room environment matching the house style
  * @param {THREE.Object3D} house - The house object being entered
  * @param {boolean} skipFurniture - Whether to skip adding default furniture
  */
@@ -18,13 +84,36 @@ export function createInterior(house, skipFurniture = false) {
   worldState.interiorGroup = new THREE.Group();
   worldState.interiorGroup.name = 'interior';
   
-  const roomSize = CONFIG.interior.roomSize;
-  const height = CONFIG.interior.ceilingHeight;
+  // Get house style and compute interior properties
+  const houseStyle = house.userData.style;
+  let interior;
+  
+  if (houseStyle) {
+    // Dynamic interior based on house style
+    interior = computeInteriorFromStyle(houseStyle);
+  } else {
+    // Fallback to default CONFIG values for old houses
+    interior = {
+      roomWidth: CONFIG.interior.roomSize,
+      roomDepth: CONFIG.interior.roomSize,
+      roomHeight: CONFIG.interior.ceilingHeight,
+      wallColor: CONFIG.interior.wallColor,
+      floorColor: CONFIG.interior.floorColor,
+      ceilingColor: CONFIG.interior.ceilingColor,
+      doorColor: CONFIG.objects.house.doorColor,
+      trimColor: 0x8B4513
+    };
+  }
+  
+  // Store interior dimensions in worldState for furniture placement bounds
+  worldState.currentInterior = interior;
+  
+  const { roomWidth, roomDepth, roomHeight, wallColor, floorColor, ceilingColor, doorColor, trimColor } = interior;
   
   // Floor
-  const floorGeometry = new THREE.BoxGeometry(roomSize, 0.1, roomSize);
+  const floorGeometry = new THREE.BoxGeometry(roomWidth, 0.1, roomDepth);
   const floorMaterial = new THREE.MeshStandardMaterial({ 
-    color: CONFIG.interior.floorColor,
+    color: floorColor,
     roughness: 0.8
   });
   const floor = new THREE.Mesh(floorGeometry, floorMaterial);
@@ -34,68 +123,73 @@ export function createInterior(house, skipFurniture = false) {
   
   // Walls
   const wallMaterial = new THREE.MeshStandardMaterial({ 
-    color: CONFIG.interior.wallColor,
+    color: wallColor,
     roughness: 0.9
   });
   
   // Back wall
-  const backWallGeometry = new THREE.BoxGeometry(roomSize, height, 0.2);
+  const backWallGeometry = new THREE.BoxGeometry(roomWidth, roomHeight, 0.2);
   const backWall = new THREE.Mesh(backWallGeometry, wallMaterial);
-  backWall.position.set(0, height / 2, -roomSize / 2);
+  backWall.position.set(0, roomHeight / 2, -roomDepth / 2);
   backWall.receiveShadow = true;
   worldState.interiorGroup.add(backWall);
   
   // Left wall
-  const sideWallGeometry = new THREE.BoxGeometry(0.2, height, roomSize);
+  const sideWallGeometry = new THREE.BoxGeometry(0.2, roomHeight, roomDepth);
   const leftWall = new THREE.Mesh(sideWallGeometry, wallMaterial);
-  leftWall.position.set(-roomSize / 2, height / 2, 0);
+  leftWall.position.set(-roomWidth / 2, roomHeight / 2, 0);
   leftWall.receiveShadow = true;
   worldState.interiorGroup.add(leftWall);
   
   // Right wall
   const rightWall = new THREE.Mesh(sideWallGeometry, wallMaterial);
-  rightWall.position.set(roomSize / 2, height / 2, 0);
+  rightWall.position.set(roomWidth / 2, roomHeight / 2, 0);
   rightWall.receiveShadow = true;
   worldState.interiorGroup.add(rightWall);
   
-  // Front wall with door opening
-  const frontWallLeftGeometry = new THREE.BoxGeometry(roomSize / 2 - 1, height, 0.2);
+  // Front wall with door opening (door width is ~2m)
+  const doorWidth = 2;
+  const frontWallSideWidth = (roomWidth - doorWidth) / 2;
+  
+  const frontWallLeftGeometry = new THREE.BoxGeometry(frontWallSideWidth, roomHeight, 0.2);
   const frontWallLeft = new THREE.Mesh(frontWallLeftGeometry, wallMaterial);
-  frontWallLeft.position.set(-roomSize / 4 - 0.5, height / 2, roomSize / 2);
+  frontWallLeft.position.set(-roomWidth / 2 + frontWallSideWidth / 2, roomHeight / 2, roomDepth / 2);
   frontWallLeft.receiveShadow = true;
   worldState.interiorGroup.add(frontWallLeft);
   
-  const frontWallRightGeometry = new THREE.BoxGeometry(roomSize / 2 - 1, height, 0.2);
+  const frontWallRightGeometry = new THREE.BoxGeometry(frontWallSideWidth, roomHeight, 0.2);
   const frontWallRight = new THREE.Mesh(frontWallRightGeometry, wallMaterial);
-  frontWallRight.position.set(roomSize / 4 + 0.5, height / 2, roomSize / 2);
+  frontWallRight.position.set(roomWidth / 2 - frontWallSideWidth / 2, roomHeight / 2, roomDepth / 2);
   frontWallRight.receiveShadow = true;
   worldState.interiorGroup.add(frontWallRight);
   
   // Top of door frame
-  const doorFrameTopGeometry = new THREE.BoxGeometry(2, height - 2.2, 0.2);
+  const doorFrameHeight = roomHeight - 2.2;
+  const doorFrameTopGeometry = new THREE.BoxGeometry(doorWidth, doorFrameHeight, 0.2);
   const doorFrameTop = new THREE.Mesh(doorFrameTopGeometry, wallMaterial);
-  doorFrameTop.position.set(0, height - (height - 2.2) / 2, roomSize / 2);
+  doorFrameTop.position.set(0, roomHeight - doorFrameHeight / 2, roomDepth / 2);
   doorFrameTop.receiveShadow = true;
   worldState.interiorGroup.add(doorFrameTop);
   
   // Ceiling
-  const ceilingGeometry = new THREE.BoxGeometry(roomSize, 0.1, roomSize);
+  const ceilingGeometry = new THREE.BoxGeometry(roomWidth, 0.1, roomDepth);
   const ceilingMaterial = new THREE.MeshStandardMaterial({ 
-    color: CONFIG.interior.ceilingColor,
+    color: ceilingColor,
     roughness: 1
   });
   const ceiling = new THREE.Mesh(ceilingGeometry, ceilingMaterial);
-  ceiling.position.y = height;
+  ceiling.position.y = roomHeight;
   ceiling.receiveShadow = true;
   worldState.interiorGroup.add(ceiling);
   
+  // Baseboard trim around the room
+  addBaseboards(worldState.interiorGroup, roomWidth, roomDepth, trimColor);
+  
   // Exit door (interactive)
   const exitDoorGeometry = new THREE.BoxGeometry(1.8, 2.2, 0.15);
-  const exitDoorMaterial = new THREE.MeshStandardMaterial({ 
-    color: CONFIG.objects.house.doorColor
-  });
+  const exitDoorMaterial = new THREE.MeshStandardMaterial({ color: doorColor });
   const exitDoor = new THREE.Mesh(exitDoorGeometry, exitDoorMaterial);
-  exitDoor.position.set(0, 1.1, roomSize / 2 - 0.1);
+  exitDoor.position.set(0, 1.1, roomDepth / 2 - 0.1);
   exitDoor.userData = {
     type: 'door',
     isInteractive: true,
@@ -105,22 +199,27 @@ export function createInterior(house, skipFurniture = false) {
   exitDoor.name = 'exitDoor';
   worldState.interiorGroup.add(exitDoor);
   
-  // Interior lighting
-  const interiorLight = new THREE.PointLight(0xFFFFFF, 0.8, 20);
-  interiorLight.position.set(0, height - 0.5, 0);
+  // Interior lighting - scale light range with room size
+  const lightRange = Math.max(roomWidth, roomDepth) * 1.5;
+  const interiorLight = new THREE.PointLight(0xFFFAF0, 0.9, lightRange);
+  interiorLight.position.set(0, roomHeight - 0.3, 0);
   interiorLight.castShadow = true;
   interiorLight.shadow.mapSize.width = 1024;
   interiorLight.shadow.mapSize.height = 1024;
   worldState.interiorGroup.add(interiorLight);
   
+  // Add a subtle fill light for ambiance
+  const fillLight = new THREE.PointLight(0xFFE4C4, 0.3, lightRange * 0.8);
+  fillLight.position.set(0, roomHeight * 0.5, -roomDepth * 0.3);
+  worldState.interiorGroup.add(fillLight);
+  
   // Add furniture only if not loading saved interior
   if (!skipFurniture) {
-    addFurnitureToInterior();
+    addFurnitureToInterior(roomWidth, roomDepth);
     
-    // Add some interior animals
-    const roomSize = CONFIG.interior.roomSize;
-    createCat(-roomSize / 3, -roomSize / 4);
-    createDog(roomSize / 4, -roomSize / 4);
+    // Add some interior animals in positions scaled to room
+    createCat(-roomWidth / 3, -roomDepth / 4);
+    createDog(roomWidth / 4, -roomDepth / 4);
   }
   
   // Add the interior to the scene
@@ -146,6 +245,46 @@ export function createInterior(house, skipFurniture = false) {
       }
     });
   }
+}
+
+/**
+ * Adds baseboard trim around the interior walls
+ * @param {THREE.Group} group - Interior group to add to
+ * @param {number} roomWidth - Room width
+ * @param {number} roomDepth - Room depth
+ * @param {number} trimColor - Color for baseboards
+ */
+function addBaseboards(group, roomWidth, roomDepth, trimColor) {
+  const baseboardHeight = 0.12;
+  const baseboardDepth = 0.04;
+  const baseboardMaterial = new THREE.MeshStandardMaterial({ 
+    color: trimColor,
+    roughness: 0.6
+  });
+  
+  // Back baseboard
+  const backBoard = new THREE.Mesh(
+    new THREE.BoxGeometry(roomWidth, baseboardHeight, baseboardDepth),
+    baseboardMaterial
+  );
+  backBoard.position.set(0, baseboardHeight / 2, -roomDepth / 2 + baseboardDepth / 2);
+  group.add(backBoard);
+  
+  // Left baseboard
+  const leftBoard = new THREE.Mesh(
+    new THREE.BoxGeometry(baseboardDepth, baseboardHeight, roomDepth),
+    baseboardMaterial
+  );
+  leftBoard.position.set(-roomWidth / 2 + baseboardDepth / 2, baseboardHeight / 2, 0);
+  group.add(leftBoard);
+  
+  // Right baseboard
+  const rightBoard = new THREE.Mesh(
+    new THREE.BoxGeometry(baseboardDepth, baseboardHeight, roomDepth),
+    baseboardMaterial
+  );
+  rightBoard.position.set(roomWidth / 2 - baseboardDepth / 2, baseboardHeight / 2, 0);
+  group.add(rightBoard);
 }
 
 

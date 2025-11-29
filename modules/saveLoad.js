@@ -7,12 +7,13 @@ import { CONFIG } from './config.js';
 import { 
   worldObjects, interiorObjects, worldAnimals, interiorAnimals,
   camera, cameraController, worldState, selectedObjectType, ghostRotation, scene, clock,
-  interactableObjects, skyMesh, sunMesh, moonMesh, sunLight, moonLight, ambientLight
+  interactableObjects, skyMesh, sunMesh, moonMesh, sunLight, moonLight, ambientLight, mobs
 } from './gameState.js';
 import { createTree, createRock, createHouse } from './worldObjects.js';
-import { createCow, createPig, createHorse } from './worldAnimals.js';
+import { createCow, createPig, createHorse, createDragon } from './worldAnimals.js';
 import { createChair, createTable, createCouch, createTV, createBed } from './interiorObjects.js';
 import { createCat, createDog } from './interiorAnimals.js';
+import { createInitialMobs } from './mobs.js';
 import { disposeObject } from './utils.js';
 import { updateCameraRotation } from './camera.js';
 import { createInterior, removeInterior } from './interior.js';
@@ -67,7 +68,9 @@ export function saveGameState() {
         type: obj.userData.type,
         position: obj.position.toArray(),
         rotation: obj.rotation.y,
-        uuid: obj.uuid
+        uuid: obj.uuid,
+        // Persist house style for dynamic houses
+        style: obj.userData.style || null
       })),
       worldAnimals: worldAnimals.map(animal => ({
         type: animal.userData.type,
@@ -152,8 +155,8 @@ export function loadGameState() {
           newObj = createRock(x, z);
           break;
         case 'house':
-          // Pass the UUID to preserve it for interior mapping
-          newObj = createHouse(x, z, objData.uuid);
+          // Pass UUID and style to recreate identical house appearance
+          newObj = createHouse(x, z, objData.uuid, objData.style || null);
           break;
       }
       
@@ -176,6 +179,9 @@ export function loadGameState() {
           break;
         case 'horse':
           newAnimal = createHorse(x, z);
+          break;
+        case 'dragon':
+          newAnimal = createDragon(x, z);
           break;
       }
       
@@ -229,6 +235,9 @@ export function loadGameState() {
       worldState.isInside = false;
       worldState.currentHouse = null;
     }
+
+    // Respawn mobs for the loaded world (not persisted yet)
+    createInitialMobs();
     
     return true;
   } catch (error) {
@@ -254,6 +263,13 @@ function clearWorldObjects() {
     disposeObject(animal);
   });
   worldAnimals.length = 0;
+
+  // Clear hostile mobs
+  [...mobs].forEach(mob => {
+    if (mob.parent) mob.parent.remove(mob);
+    disposeObject(mob);
+  });
+  mobs.length = 0;
   
   // Clear interior objects if inside
   if (worldState.isInside) {

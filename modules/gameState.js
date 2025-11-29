@@ -4,6 +4,14 @@
  */
 
 import { CONFIG } from './config.js';
+import {
+  createEmptyInventory,
+  addToInventory,
+  removeFromInventory,
+  hasResource,
+  getResourceAmount,
+  RESOURCE_DEFINITIONS
+} from './resources.js';
 
 // Core Three.js objects
 export let scene, camera, renderer;
@@ -16,6 +24,8 @@ export const player = {
   canJump: true,
   height: CONFIG.player.height
 };
+export const playerMaxHealth = CONFIG.player.maxHealth;
+export let playerHealth = CONFIG.player.maxHealth;
 
 // Camera controller for FPS-style movement
 export const cameraController = {
@@ -29,7 +39,8 @@ export const keys = {
   backward: false,
   left: false,
   right: false,
-  jump: false
+  jump: false,
+  sprint: false
 };
 
 export const mouseControls = {
@@ -40,18 +51,20 @@ export const mouseControls = {
 
 // Building system state
 export let selectedObjectType = 0;
-export const buildableTypes = ['fists', 'tree', 'rock', 'house', 'cow', 'pig', 'horse'];
+export const buildableTypes = ['fists', 'tree', 'rock', 'house', 'cow', 'pig', 'horse', 'dragon'];
 export const interiorBuildableTypes = ['fists', 'chair', 'table', 'couch', 'tv', 'bed', 'cat', 'dog'];
 export let highlightedObject = null;
 export let ghostObject = null;
 export let ghostRotation = 0;  // Rotation for ghost preview objects
 export let lastGhostType = null;  // Track last ghost type to avoid recreation
 export let lastGhostRotation = 0;  // Track last rotation to detect changes
+export let selectedInventoryResource = null;
+export const mobs = []; // Hostile mobs (e.g., spiders)
 
 // World object management
 export const worldObjects = [];     // Outdoor objects (trees, rocks, houses)
 export const interiorObjects = [];  // Indoor objects (furniture: tv, chairs, couches, etc.)
-export const worldAnimals = [];     // Outdoor animals (cows, pigs, horses)
+export const worldAnimals = [];     // Outdoor animals (cows, pigs, horses, dragons)
 export const interiorAnimals = [];  // Indoor animals (cats, dogs)
 export let interactableObjects;
 
@@ -74,8 +87,18 @@ export const uiElements = {
   crosshair: null,
   compass: null,
   selector: null,
-  instructions: null
+  instructions: null,
+  inventory: null,
+  health: null,
+  saveLoadPanel: null,
+  damageFlash: null
 };
+
+// Inventory and resource system
+export const inventory = createEmptyInventory();
+export const RESOURCES = RESOURCE_DEFINITIONS;
+
+export let inventoryOpen = false;
 
 // Setter functions for variables that need to be updated
 export function setScene(value) { scene = value; }
@@ -96,3 +119,23 @@ export function setGhostRotation(value) { ghostRotation = value; }
 export function setSelectedObjectType(value) { selectedObjectType = value; }
 export function setLastGhostType(value) { lastGhostType = value; }
 export function setLastGhostRotation(value) { lastGhostRotation = value; }
+export function setInventoryOpen(value) { inventoryOpen = value; }
+export function setSelectedInventoryResource(value) { selectedInventoryResource = value; }
+export function setPlayerHealth(value) { playerHealth = Math.max(0, Math.floor(value)); }
+
+// Resource management functions
+export function addResource(resourceType, amount = 1) {
+  return addToInventory(inventory, resourceType, amount);
+}
+
+export function removeResource(resourceType, amount = 1) {
+  return removeFromInventory(inventory, resourceType, amount);
+}
+
+export function hasResourceAmount(resourceType, amount = 1) {
+  return hasResource(inventory, resourceType, amount);
+}
+
+export function getResourceCount(resourceType) {
+  return getResourceAmount(inventory, resourceType);
+}

@@ -5,6 +5,10 @@
 import { CONFIG } from './config.js';
 import { camera, cameraController } from './gameState.js';
 
+// Reusable vectors to avoid per-frame allocations (unique names for bundler)
+const CAMERA_FORWARD_VEC = new THREE.Vector3();
+const CAMERA_RIGHT_VEC = new THREE.Vector3();
+
 /**
  * Update camera rotation based on current yaw and pitch
  */
@@ -41,26 +45,30 @@ export function applyCameraMovement(deltaYaw, deltaPitch) {
 
 /**
  * Get forward direction vector based on camera yaw
+ * @param {THREE.Vector3} [target] - Optional vector to write into
  * @returns {THREE.Vector3} Forward direction vector
  */
-export function getForwardVector() {
+export function getForwardVector(target = CAMERA_FORWARD_VEC) {
   // Get forward direction based on yaw only (for movement)
-  return new THREE.Vector3(
+  target.set(
     -Math.sin(cameraController.yaw),
     0,
     -Math.cos(cameraController.yaw)
   );
+  return target;
 }
 
 /**
  * Get right direction vector based on camera yaw
+ * @param {THREE.Vector3} [target] - Optional vector to write into
  * @returns {THREE.Vector3} Right direction vector
  */
-export function getRightVector() {
+export function getRightVector(target = CAMERA_RIGHT_VEC) {
   // Get right direction based on yaw only
-  return new THREE.Vector3(
+  target.set(
     -Math.cos(cameraController.yaw),
     0,
     Math.sin(cameraController.yaw)
   );
+  return target;
 }

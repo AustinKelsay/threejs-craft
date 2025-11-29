@@ -3,7 +3,10 @@
  */
 
 import { CONFIG } from './config.js';
-import { uiElements, selectedObjectType, worldState, buildableTypes, interiorBuildableTypes } from './gameState.js';
+import { uiElements, selectedObjectType, worldState, buildableTypes, interiorBuildableTypes, inventory, inventoryOpen, selectedInventoryResource, setSelectedInventoryResource, playerHealth, playerMaxHealth } from './gameState.js';
+import { getResourceIcon, getResourceLabel, getInventoryEntries } from './resources.js';
+
+let damageFlashTimeout = null;
 
 /**
  * Create all UI elements for the game
@@ -13,6 +16,10 @@ export function createUIElements() {
   createCompass();
   createObjectSelector();
   createSaveLoadPanel();
+  createInventoryPanel();
+  createHealthPanel();
+  createDamageFlash();
+  updateHealthUI();
   updateInstructions();
   updateObjectSelector();
 }
@@ -96,7 +103,8 @@ export function updateSelectorContent() {
     { icon: '🏠', label: 'House', key: '3' },
     { icon: '🐄', label: 'Cow', key: '4' },
     { icon: '🐷', label: 'Pig', key: '5' },
-    { icon: '🐴', label: 'Horse', key: '6' }
+    { icon: '🐴', label: 'Horse', key: '6' },
+    { icon: '🐉', label: 'Dragon', key: '7' }
   ];
   
   const interiorItems = [
@@ -129,6 +137,78 @@ export function updateSelectorContent() {
       <div>${item.icon}<br>${item.label}<br>[${item.key}]</div>
     </div>
   `).join('');
+}
+
+/**
+ * Create a simple heart-based health panel.
+ */
+function createHealthPanel() {
+  const panel = document.createElement('div');
+  panel.id = 'healthPanel';
+  panel.style.cssText = `
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.6);
+    border-radius: 8px;
+    color: white;
+    font-family: Arial;
+    font-size: 18px;
+    min-width: 120px;
+    text-align: center;
+    z-index: 900;
+  `;
+  document.body.appendChild(panel);
+  uiElements.health = panel;
+}
+
+/**
+ * Fullscreen red flash overlay shown when the player takes damage.
+ */
+function createDamageFlash() {
+  const overlay = document.createElement('div');
+  overlay.id = 'damageFlash';
+  overlay.style.cssText = `
+    position: fixed;
+    inset: 0;
+    background: rgba(255, 0, 0, 0.45);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
+    z-index: 1500;
+  `;
+  document.body.appendChild(overlay);
+  uiElements.damageFlash = overlay;
+}
+
+/**
+ * Briefly flash the damage overlay. Defaults to 0.5s.
+ * @param {number} durationMs
+ */
+export function triggerDamageFlash(durationMs = 500) {
+  const overlay = uiElements.damageFlash || document.getElementById('damageFlash');
+  if (!overlay) return;
+
+  overlay.style.opacity = '1';
+  if (damageFlashTimeout) {
+    clearTimeout(damageFlashTimeout);
+  }
+  damageFlashTimeout = setTimeout(() => {
+    overlay.style.opacity = '0';
+  }, durationMs);
+}
+
+/**
+ * Update the heart display to reflect current player health.
+ */
+export function updateHealthUI() {
+  const panel = document.getElementById('healthPanel');
+  if (!panel) return;
+  const hearts = '❤️'.repeat(Math.max(0, playerHealth));
+  const missing = '🤍'.repeat(Math.max(0, playerMaxHealth - playerHealth));
+  panel.textContent = `${hearts}${missing}`;
 }
 
 /**
@@ -208,10 +288,137 @@ export function updateSaveStatus(message, color = 'white') {
   if (statusElement) {
     statusElement.textContent = message;
     statusElement.style.color = color;
-    
+
     // Clear message after 3 seconds
     setTimeout(() => {
       statusElement.textContent = '';
     }, 3000);
+  }
+}
+
+/**
+ * Create the inventory panel
+ */
+function createInventoryPanel() {
+  const panel = document.createElement('div');
+  panel.id = 'inventoryPanel';
+  panel.style.cssText = `
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0, 0, 0, 0.9);
+    padding: 20px;
+    border-radius: 10px;
+    border: 2px solid #666;
+    color: white;
+    font-family: Arial;
+    font-size: 16px;
+    min-width: 300px;
+    display: none;
+    z-index: 1000;
+  `;
+
+  panel.innerHTML = `
+    <div style="margin-bottom: 15px; font-weight: bold; font-size: 20px; text-align: center; border-bottom: 2px solid #666; padding-bottom: 10px;">
+      📦 Inventory
+    </div>
+    <div id="inventoryContent" style="margin-top: 10px;">
+      <!-- Will be populated by updateInventoryDisplay -->
+    </div>
+    <div style="margin-top: 15px; text-align: center; font-size: 12px; color: #999; border-top: 1px solid #666; padding-top: 10px;">
+      Press [I] to close
+    </div>
+  `;
+
+  document.body.appendChild(panel);
+  uiElements.inventory = panel;
+
+  // Initialize inventory display
+  updateInventoryDisplay();
+}
+
+/**
+ * Toggle inventory panel visibility
+ */
+export function toggleInventory() {
+  const panel = document.getElementById('inventoryPanel');
+  if (panel) {
+    const isOpen = panel.style.display !== 'none';
+    const willOpen = isOpen ? 'none' : 'block';
+    panel.style.display = willOpen;
+
+    if (willOpen === 'block') {
+      ensureInventorySelection();
+    }
+
+    updateInventoryDisplay();
+    return willOpen === 'block';
+  }
+  return false;
+}
+
+/**
+ * Update the inventory display with current resources
+ */
+export function updateInventoryDisplay() {
+  const contentElement = document.getElementById('inventoryContent');
+  if (!contentElement) return;
+
+  const listWrapper = document.createElement('div');
+  listWrapper.style.display = 'flex';
+  listWrapper.style.flexDirection = 'column';
+  listWrapper.style.gap = '10px';
+
+  const inventoryEntries = getInventoryEntries(inventory);
+
+  inventoryEntries.forEach(([resource, amount]) => {
+    const resourceIcon = getResourceIcon(resource);
+    const resourceLabel = getResourceLabel(resource);
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.dataset.resource = resource;
+    item.style.cssText = `
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 5px;
+      border: 1px solid ${selectedInventoryResource === resource ? '#4CAF50' : '#666'};
+      color: white;
+      cursor: pointer;
+      text-align: left;
+    `;
+
+    item.innerHTML = `
+      <span style="font-size: 18px;">${resourceIcon} ${resourceLabel}</span>
+      <span style="font-weight: bold; font-size: 18px; color: #4CAF50;">${amount}</span>
+    `;
+
+    item.addEventListener('click', () => {
+      setSelectedInventoryResource(resource);
+      updateInventoryDisplay();
+    });
+
+    listWrapper.appendChild(item);
+  });
+
+  // Clear and re-render
+  contentElement.innerHTML = '';
+  contentElement.appendChild(listWrapper);
+}
+
+/**
+ * Pick the first available resource as selection if none is chosen.
+ */
+function ensureInventorySelection() {
+  if (selectedInventoryResource) return;
+  const entries = getInventoryEntries(inventory);
+  const firstWithAmount = entries.find(([, amount]) => amount > 0);
+  const fallback = entries[0];
+  const choice = (firstWithAmount || fallback || [null])[0];
+  if (choice) {
+    setSelectedInventoryResource(choice);
   }
 }

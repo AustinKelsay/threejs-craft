@@ -8,6 +8,12 @@ import {
   skyMesh, sunMesh, moonMesh, cameraController 
 } from './gameState.js';
 
+// Preallocated colors to avoid per-frame allocations
+const sunriseColor = new THREE.Color(0xff6b35);
+const dayColor = new THREE.Color(0x87ceeb);
+const nightColor = new THREE.Color(0x191970);
+const workingColor = new THREE.Color();
+
 /**
  * Update the day/night cycle
  */
@@ -16,7 +22,8 @@ export function updateDayNightCycle() {
   const elapsed = clock.getElapsedTime() % totalCycle;
   const isDay = elapsed < CONFIG.dayNight.dayDuration;
   
-  let progress, lightIntensity, skyColor;
+  let progress, lightIntensity;
+  const skyColor = workingColor;
   
   if (isDay) {
     // Day time
@@ -38,14 +45,8 @@ export function updateDayNightCycle() {
     ambientLight.intensity = 0.3 + lightIntensity * 0.2;
     
     // Sky color transitions
-    if (progress < 0.1 || progress > 0.9) {
-      // Sunrise/sunset
-      skyColor = new THREE.Color(0xff6b35);
-      scene.fog.color = skyColor;
-    } else {
-      skyColor = new THREE.Color(0x87ceeb);
-      scene.fog.color = skyColor;
-    }
+    skyColor.copy((progress < 0.1 || progress > 0.9) ? sunriseColor : dayColor);
+    scene.fog.color.copy(skyColor);
   } else {
     // Night time
     progress = (elapsed - CONFIG.dayNight.dayDuration) / CONFIG.dayNight.nightDuration;
@@ -65,12 +66,12 @@ export function updateDayNightCycle() {
     moonLight.intensity = lightIntensity;
     ambientLight.intensity = 0.1;
     
-    skyColor = new THREE.Color(0x191970);
-    scene.fog.color = skyColor;
+    skyColor.copy(nightColor);
+    scene.fog.color.copy(skyColor);
   }
   
   // Update sky color
-  skyMesh.material.color = skyColor;
+  skyMesh.material.color.copy(skyColor);
   
   // Update compass time display
   updateCompass(isDay, progress);

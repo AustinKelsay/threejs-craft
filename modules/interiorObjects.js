@@ -359,28 +359,33 @@ export function createBed(x = 0, z = 0) {
 
 /**
  * Adds default furniture to the interior room
+ * Positions are scaled based on room dimensions
+ * @param {number} roomWidth - Width of the interior room (optional, falls back to CONFIG)
+ * @param {number} roomDepth - Depth of the interior room (optional, falls back to CONFIG)
  */
-export function addFurnitureToInterior() {
-  const roomSize = CONFIG.interior.roomSize;
+export function addFurnitureToInterior(roomWidth = null, roomDepth = null) {
+  // Use provided dimensions or fall back to CONFIG
+  const width = roomWidth || CONFIG.interior.roomSize;
+  const depth = roomDepth || CONFIG.interior.roomSize;
   
-  // Add some chairs
-  const chair1 = createChair(-roomSize / 4, roomSize / 4);
+  // Add some chairs near the front (positive Z)
+  const chair1 = createChair(-width / 4, depth / 4);
   chair1.rotation.y = Math.PI / 4;
   
-  const chair2 = createChair(roomSize / 4, roomSize / 4);
+  const chair2 = createChair(width / 4, depth / 4);
   chair2.rotation.y = -Math.PI / 4;
   
-  // Add a table
-  createTable(0, roomSize / 4);
+  // Add a table between the chairs
+  createTable(0, depth / 4);
   
-  // Add a couch
-  const couch = createCouch(0, -roomSize / 3);
+  // Add a couch facing the back wall
+  const couch = createCouch(0, -depth / 3);
   couch.rotation.y = Math.PI;
   
-  // Add a TV
-  createTV(0, -roomSize / 2 + 1);
+  // Add a TV against the back wall
+  createTV(0, -depth / 2 + 1);
   
-  // Add a bed
-  const bed = createBed(roomSize / 3, 0);
+  // Add a bed on the side
+  const bed = createBed(width / 3, 0);
   bed.rotation.y = Math.PI / 2;
 }
