@@ -3,7 +3,7 @@
  */
 
 import { CONFIG } from './config.js';
-import { camera, player, keys, mouseControls, worldState } from './gameState.js';
+import { camera, player, keys, mouseControls, worldState, mountState } from './gameState.js';
 import { getForwardVector, getRightVector, applyCameraMovement } from './camera.js';
 
 // Reusable vectors to minimize allocations in the hot update loop
@@ -11,11 +11,29 @@ const moveVector = new THREE.Vector3();
 const forwardVec = new THREE.Vector3();
 const rightVec = new THREE.Vector3();
 
+function applyMouseLook() {
+  if (mouseControls.active && (mouseControls.movementX !== 0 || mouseControls.movementY !== 0)) {
+    applyCameraMovement(
+      -mouseControls.movementX * CONFIG.player.lookSpeed,
+      -mouseControls.movementY * CONFIG.player.lookSpeed
+    );
+
+    mouseControls.movementX = 0;
+    mouseControls.movementY = 0;
+  }
+}
+
 /**
  * Update player movement and physics
  * @param {number} delta - Time since last frame
  */
 export function updatePlayer(delta) {
+  // When mounted, normal player physics are disabled but we still read mouse look
+  if (mountState.isMounted) {
+    applyMouseLook();
+    return;
+  }
+
   // Apply gravity
   player.velocity.y -= CONFIG.player.gravity * delta;
   
@@ -62,15 +80,6 @@ export function updatePlayer(delta) {
     camera.position.x = THREE.MathUtils.clamp(camera.position.x, -boundary, boundary);
     camera.position.z = THREE.MathUtils.clamp(camera.position.z, -boundary, boundary);
   }
-  
-  // Mouse look with proper yaw/pitch control
-  if (mouseControls.active && (mouseControls.movementX !== 0 || mouseControls.movementY !== 0)) {
-    applyCameraMovement(
-      -mouseControls.movementX * CONFIG.player.lookSpeed,
-      -mouseControls.movementY * CONFIG.player.lookSpeed
-    );
-    
-    mouseControls.movementX = 0;
-    mouseControls.movementY = 0;
-  }
+
+  applyMouseLook();
 }

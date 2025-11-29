@@ -27,6 +27,7 @@ modules=(
     "world.js"
     "interior.js"
     "building.js"
+    "mount.js"
     "player.js"
     "hands.js"
     "dayNight.js"

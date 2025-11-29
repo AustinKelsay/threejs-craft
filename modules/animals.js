@@ -147,6 +147,12 @@ export function updateAnimals(delta) {
       const data = animal.userData;
       
       if (data.type === 'dragon') {
+        if (data.isMounted) {
+          data.isFlying = true;
+          data.targetAltitude = Math.max(data.groundHeight, animal.position.y);
+          animateDragonParts(animal, data, currentTime, 1);
+          continue;
+        }
         updateDragon(animal, delta, currentTime, hardBoundary, softBoundary);
         continue;
       }

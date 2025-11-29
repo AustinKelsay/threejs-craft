@@ -243,11 +243,14 @@ export function updateObjectHighlight() {
  * @param {THREE.Object3D} object - Object to highlight
  */
 function highlightObject(object) {
+  const isDragon = object?.userData?.type === 'dragon';
+  const emissiveColor = isDragon ? CONFIG.building.dragonHighlightColor : CONFIG.building.highlightColor;
+  const intensity = isDragon ? 0.7 : 0.3;
   object.traverse(child => {
     if (child.isMesh) {
       child.material = child.material.clone();
-      child.material.emissive = new THREE.Color(CONFIG.building.highlightColor);
-      child.material.emissiveIntensity = 0.3;
+      child.material.emissive = new THREE.Color(emissiveColor);
+      child.material.emissiveIntensity = intensity;
     }
   });
 }

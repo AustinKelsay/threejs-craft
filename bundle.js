@@ -35,7 +35,8 @@ const CONFIG = {
   // Building system
   building: {
     distance: 8,              // Build/interact distance
-    highlightColor: 0xffff00, // Object highlight color (yellow)
+    highlightColor: 0xffff00, // Default highlight color (yellow)
+    dragonHighlightColor: 0x00ff66, // Dragon-specific highlight (emerald glow)
     ghostOpacity: 0.3         // Preview object transparency
   },
   
@@ -484,6 +485,15 @@ const player = {
 };
 const playerMaxHealth = CONFIG.player.maxHealth;
 let playerHealth = CONFIG.player.maxHealth;
+
+// Mount state (used for rideable creatures like the dragon)
+const mountState = {
+  isMounted: false,
+  dragon: null,
+  cameraOffset: new THREE.Vector3(0, CONFIG.objects.dragon.size * 1.3, -CONFIG.objects.dragon.size * 2.2),
+  smoothCamera: new THREE.Vector3(),
+  flightVelocity: new THREE.Vector3()
+};
 
 // Camera controller for FPS-style movement
 const cameraController = {
@@ -2876,6 +2886,7 @@ function createDragon(x, z) {
     removable: true,
     isAnimal: true,
     isFriendly: true,
+    isMounted: false,
     legs,
     wings: [leftWing, rightWing],
     tailSegments,
@@ -4264,11 +4275,14 @@ function updateObjectHighlight() {
  * @param {THREE.Object3D} object - Object to highlight
  */
 function highlightObject(object) {
+  const isDragon = object?.userData?.type === 'dragon';
+  const emissiveColor = isDragon ? CONFIG.building.dragonHighlightColor : CONFIG.building.highlightColor;
+  const intensity = isDragon ? 0.7 : 0.3;
   object.traverse(child => {
     if (child.isMesh) {
       child.material = child.material.clone();
-      child.material.emissive = new THREE.Color(CONFIG.building.highlightColor);
-      child.material.emissiveIntensity = 0.3;
+      child.material.emissive = new THREE.Color(emissiveColor);
+      child.material.emissiveIntensity = intensity;
     }
   });
 }
@@ -4772,6 +4786,143 @@ function updateGhostObject() {
 }
 
 
+// ===== Module: mount.js =====
+/**
+ * Dragon mounting and flight controls
+ */
+
+
+const FORWARD = new THREE.Vector3();
+const RIGHT = new THREE.Vector3();
+const UP = new THREE.Vector3(0, 1, 0);
+const targetCamPos = new THREE.Vector3();
+const tempOffset = new THREE.Vector3();
+
+/**
+ * Whether the player is currently mounted on a dragon
+ * @returns {boolean}
+ */
+function isMounted() {
+  return mountState.isMounted && mountState.dragon;
+}
+
+/**
+ * Mount the given dragon and switch to flight control
+ * @param {THREE.Object3D} dragon
+ * @returns {boolean} True if mount succeeded
+ */
+function mountDragon(dragon) {
+  if (!dragon || isMounted()) {
+    return false;
+  }
+  mountState.isMounted = true;
+  mountState.dragon = dragon;
+  mountState.flightVelocity.set(0, 0, 0);
+  mountState.smoothCamera.copy(camera.position);
+
+  dragon.userData.isMounted = true;
+  dragon.userData.isFlying = true;
+  dragon.userData.flightEndTime = Infinity;
+  dragon.userData.targetAltitude = Math.max(dragon.position.y, dragon.userData.groundHeight + 2);
+
+  // Clear highlight glow so the dragon uses flight emissive instead
+  resetObjectHighlight(dragon);
+  setHighlightedObject(null);
+
+  // Align view with the dragon
+  cameraController.yaw = dragon.rotation.y;
+  cameraController.pitch = 0;
+  applyCameraMovement(0, 0);
+
+  return true;
+}
+
+/**
+ * Dismount the current dragon and restore normal controls
+ * @returns {boolean} True if dismounted
+ */
+function dismountDragon() {
+  if (!isMounted()) {
+    return false;
+  }
+
+  const dragon = mountState.dragon;
+  mountState.isMounted = false;
+  mountState.dragon = null;
+  mountState.flightVelocity.set(0, 0, 0);
+
+  if (dragon && dragon.userData) {
+    dragon.userData.isMounted = false;
+    dragon.userData.flightEndTime = 0;
+    dragon.userData.isFlying = false;
+    dragon.userData.targetAltitude = dragon.userData.groundHeight;
+  }
+
+  // Drop the player just beside the dragon to avoid clipping
+  camera.position.copy(dragon ? dragon.position : camera.position);
+  camera.position.add(new THREE.Vector3(1, CONFIG.player.height, 1));
+  mountState.smoothCamera.copy(camera.position);
+
+  return true;
+}
+
+/**
+ * Update mounted dragon flight and chase camera
+ * @param {number} delta - seconds since last frame
+ */
+function updateMount(delta) {
+  if (!isMounted()) {
+    return;
+  }
+
+  const dragon = mountState.dragon;
+  if (!dragon || !dragon.parent) {
+    dismountDragon();
+    return;
+  }
+
+  // Build movement vector from camera facing and WASD
+  camera.getWorldDirection(FORWARD);
+  FORWARD.normalize();
+  RIGHT.crossVectors(FORWARD, UP).normalize();
+
+  const moveVec = mountState.flightVelocity;
+  moveVec.set(0, 0, 0);
+  if (keys.forward) moveVec.add(FORWARD);
+  if (keys.backward) moveVec.sub(FORWARD);
+  if (keys.left) moveVec.sub(RIGHT);
+  if (keys.right) moveVec.add(RIGHT);
+
+  const hasInput = moveVec.lengthSq() > 0;
+  if (hasInput) {
+    moveVec.normalize();
+    const speed = CONFIG.objects.dragon.flySpeed * (keys.sprint ? 1.5 : 1);
+    dragon.position.addScaledVector(moveVec, speed * delta);
+  }
+
+  // Keep dragon within bounds and above ground
+  const boundary = CONFIG.world.size / 2;
+  dragon.position.x = THREE.MathUtils.clamp(dragon.position.x, -boundary, boundary);
+  dragon.position.z = THREE.MathUtils.clamp(dragon.position.z, -boundary, boundary);
+  dragon.position.y = Math.max(CONFIG.player.height * 0.6, dragon.position.y);
+
+  // Orient dragon to the camera yaw/pitch
+  dragon.rotation.y = cameraController.yaw;
+  dragon.rotation.x = THREE.MathUtils.lerp(dragon.rotation.x, cameraController.pitch * 0.6, delta * 8);
+  dragon.rotation.z = THREE.MathUtils.lerp(dragon.rotation.z, hasInput ? -moveVec.x * 0.25 : 0, delta * 6);
+
+  // Third-person chase camera offset
+  tempOffset.copy(mountState.cameraOffset);
+  tempOffset.applyAxisAngle(UP, cameraController.yaw);
+  targetCamPos.copy(dragon.position).add(tempOffset);
+  mountState.smoothCamera.lerp(targetCamPos, 1 - Math.exp(-delta * 10));
+  camera.position.copy(mountState.smoothCamera);
+
+  dragon.userData.isFlying = true;
+}
+
+
+
 // ===== Module: player.js =====
 /**
  * Player movement and physics
@@ -4783,11 +4934,29 @@ const moveVector = new THREE.Vector3();
 const forwardVec = new THREE.Vector3();
 const rightVec = new THREE.Vector3();
 
+function applyMouseLook() {
+  if (mouseControls.active && (mouseControls.movementX !== 0 || mouseControls.movementY !== 0)) {
+    applyCameraMovement(
+      -mouseControls.movementX * CONFIG.player.lookSpeed,
+      -mouseControls.movementY * CONFIG.player.lookSpeed
+    );
+
+    mouseControls.movementX = 0;
+    mouseControls.movementY = 0;
+  }
+}
+
 /**
  * Update player movement and physics
  * @param {number} delta - Time since last frame
  */
 function updatePlayer(delta) {
+  // When mounted, normal player physics are disabled but we still read mouse look
+  if (mountState.isMounted) {
+    applyMouseLook();
+    return;
+  }
+
   // Apply gravity
   player.velocity.y -= CONFIG.player.gravity * delta;
   
@@ -4834,17 +5003,8 @@ function updatePlayer(delta) {
     camera.position.x = THREE.MathUtils.clamp(camera.position.x, -boundary, boundary);
     camera.position.z = THREE.MathUtils.clamp(camera.position.z, -boundary, boundary);
   }
-  
-  // Mouse look with proper yaw/pitch control
-  if (mouseControls.active && (mouseControls.movementX !== 0 || mouseControls.movementY !== 0)) {
-    applyCameraMovement(
-      -mouseControls.movementX * CONFIG.player.lookSpeed,
-      -mouseControls.movementY * CONFIG.player.lookSpeed
-    );
-    
-    mouseControls.movementX = 0;
-    mouseControls.movementY = 0;
-  }
+
+  applyMouseLook();
 }
 
 
@@ -6415,6 +6575,10 @@ function onKeyDown(event) {
       keys.sprint = true;
       break;
     case 'Space':
+      if (isMounted()) {
+        event.preventDefault();
+        return;
+      }
       if (event.target === document.body) {
         event.preventDefault();
         // Handle both jump and remove
@@ -6491,6 +6655,12 @@ function onKeyDown(event) {
       const isOpen = toggleInventory();
       setInventoryOpen(isOpen);
       break;
+    case 'Backspace':
+      if (isMounted()) {
+        event.preventDefault();
+        dismountDragon();
+      }
+      break;
     case 'KeyG':
       handleDropResource();
       break;
@@ -6550,6 +6720,15 @@ function onClick() {
   // Check if picking up a dropped resource
   if (highlightedObject && highlightedObject.userData && highlightedObject.userData.type === 'droppedResource') {
     handleResourcePickup(highlightedObject);
+    return;
+  }
+
+  // Mount a dragon when clicked
+  if (highlightedObject && highlightedObject.userData && highlightedObject.userData.type === 'dragon' && !isMounted()) {
+    mountDragon(highlightedObject);
+    if (!mouseControls.active) {
+      renderer.domElement.requestPointerLock();
+    }
     return;
   }
 
@@ -7273,6 +7452,12 @@ function updateAnimals(delta) {
       const data = animal.userData;
       
       if (data.type === 'dragon') {
+        if (data.isMounted) {
+          data.isFlying = true;
+          data.targetAltitude = Math.max(data.groundHeight, animal.position.y);
+          animateDragonParts(animal, data, currentTime, 1);
+          continue;
+        }
         updateDragon(animal, delta, currentTime, hardBoundary, softBoundary);
         continue;
       }
@@ -7518,6 +7703,7 @@ function animate() {
   const delta = clock.getDelta();
   
   updatePlayer(delta);
+  updateMount(delta);
   updateHealthRegen(delta);
   updateHands(delta);
   

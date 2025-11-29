@@ -31,7 +31,8 @@ export const CONFIG = {
   // Building system
   building: {
     distance: 8,              // Build/interact distance
-    highlightColor: 0xffff00, // Object highlight color (yellow)
+    highlightColor: 0xffff00, // Default highlight color (yellow)
+    dragonHighlightColor: 0x00ff66, // Dragon-specific highlight (emerald glow)
     ghostOpacity: 0.3         // Preview object transparency
   },
   

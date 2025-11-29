@@ -770,6 +770,7 @@ export function createDragon(x, z) {
     removable: true,
     isAnimal: true,
     isFriendly: true,
+    isMounted: false,
     legs,
     wings: [leftWing, rightWing],
     tailSegments,

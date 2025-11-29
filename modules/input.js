@@ -20,6 +20,7 @@ import { dropResourceNearPlayer, removeDroppedResource } from './droppedResource
 import { disposeObject } from './utils.js';
 import { damageMob } from './mobs.js';
 import { triggerPunchAnimation } from './hands.js';
+import { mountDragon, dismountDragon, isMounted } from './mount.js';
 
 /**
  * Setup all event listeners
@@ -74,6 +75,10 @@ function onKeyDown(event) {
       keys.sprint = true;
       break;
     case 'Space':
+      if (isMounted()) {
+        event.preventDefault();
+        return;
+      }
       if (event.target === document.body) {
         event.preventDefault();
         // Handle both jump and remove
@@ -150,6 +155,12 @@ function onKeyDown(event) {
       const isOpen = toggleInventory();
       setInventoryOpen(isOpen);
       break;
+    case 'Backspace':
+      if (isMounted()) {
+        event.preventDefault();
+        dismountDragon();
+      }
+      break;
     case 'KeyG':
       handleDropResource();
       break;
@@ -209,6 +220,15 @@ function onClick() {
   // Check if picking up a dropped resource
   if (highlightedObject && highlightedObject.userData && highlightedObject.userData.type === 'droppedResource') {
     handleResourcePickup(highlightedObject);
+    return;
+  }
+
+  // Mount a dragon when clicked
+  if (highlightedObject && highlightedObject.userData && highlightedObject.userData.type === 'dragon' && !isMounted()) {
+    mountDragon(highlightedObject);
+    if (!mouseControls.active) {
+      renderer.domElement.requestPointerLock();
+    }
     return;
   }
 

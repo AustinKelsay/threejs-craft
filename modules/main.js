@@ -18,6 +18,7 @@ import { createInitialMobs, updateMobs } from './mobs.js';
 import { createUIElements } from './ui.js';
 import { createHands, updateHands } from './hands.js';
 import { updatePlayer } from './player.js';
+import { updateMount } from './mount.js';
 import { updateDayNightCycle } from './dayNight.js';
 import { updateObjectHighlight } from './building.js';
 import { setupEventListeners, onWindowResize, removeEventListeners } from './input.js';
@@ -103,6 +104,7 @@ function animate() {
   const delta = clock.getDelta();
   
   updatePlayer(delta);
+  updateMount(delta);
   updateHealthRegen(delta);
   updateHands(delta);
   

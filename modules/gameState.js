@@ -27,6 +27,15 @@ export const player = {
 export const playerMaxHealth = CONFIG.player.maxHealth;
 export let playerHealth = CONFIG.player.maxHealth;
 
+// Mount state (used for rideable creatures like the dragon)
+export const mountState = {
+  isMounted: false,
+  dragon: null,
+  cameraOffset: new THREE.Vector3(0, CONFIG.objects.dragon.size * 1.3, -CONFIG.objects.dragon.size * 2.2),
+  smoothCamera: new THREE.Vector3(),
+  flightVelocity: new THREE.Vector3()
+};
+
 // Camera controller for FPS-style movement
 export const cameraController = {
   yaw: 0,      // Horizontal rotation (Y-axis)
